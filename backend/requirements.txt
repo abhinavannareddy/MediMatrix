@@ -1,0 +1,11 @@
+Flask
+joblib
+numpy
+psycopg2-binary
+Flask-Cors
+numpy
+pandas
+scikit-learn
+waitress
+pymongo
+Werkzeug

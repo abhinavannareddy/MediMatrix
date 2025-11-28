@@ -1,0 +1,51 @@
+# Docker Compose Configuration for Diabetes Prediction Microservices
+# This orchestrates three services: frontend, backend API, and PostgreSQL database
+# All services run in isolated containers and communicate via Docker networking
+
+version: '3'
+
+services:
+  # Frontend service - Flask web application for user interface
+  front-end:
+    # Build the frontend image from the ./frontend directory
+    build:
+      context: ./frontend
+    # Map port 5000 from container to host machine
+    ports:
+      - "5000:5000"
+    # Ensure backend service starts before frontend
+    depends_on:
+      - backend
+
+  # Backend service - Flask API for diabetes prediction
+  backend:
+    # Build the backend image from the ./backend directory
+    build:
+      context: ./backend
+    # Map port 5001 from container to host machine
+    ports:
+      - "5001:5001"
+    # Ensure database service starts before backend
+    depends_on:
+      - db
+
+  # Database service - PostgreSQL for storing predictions and user data
+  db:
+    # Use official PostgreSQL 13 image from Docker Hub
+    image: postgres:13
+    # Set PostgreSQL environment variables for initialization
+    environment:
+      POSTGRES_USER: postgres  # Default superuser username
+      POSTGRES_PASSWORD: password  # Database password (change in production)
+      POSTGRES_DB: microservices_db  # Initial database to create
+    # Map PostgreSQL port 5432 from container to host machine
+    ports:
+      - "5432:5432"
+    # Mount persistent volume for database data persistence across container restarts
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+# Define named volumes for data persistence
+volumes:
+  # Named volume for PostgreSQL data storage
+  db-data:
