@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediMatrx: Sign in</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Cpath d='M17.5 4 8 18h6l-1.5 10L23 14h-6z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+  /* Palette matches the main dashboard (index.html) exactly, so moving
+     between the two pages never feels like a different application. */
+  :root {
+    color-scheme: dark;
+    --plane:     #0d0d0d;
+    --surface:   #1a1a19;
+    --surface-2: #212120;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --muted:     #898781;
+    --border:    rgba(255,255,255,0.10);
+    --optimised: #3987e5;
+    --price:     #199e70;
+    --critical:  #d03b3b;
+    --good:      #0ca30c;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--plane); color: var(--ink);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .panel {
+    width: 100%; max-width: 380px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 14px; padding: 26px 24px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .mark {
+    width: 38px; height: 38px; border-radius: 10px; flex: none;
+    background: linear-gradient(135deg, var(--optimised), var(--price));
+    display: grid; place-items: center; font-weight: 700; font-size: 17px; color: #fff;
+  }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  .sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+  .tab {
+    flex: 1; font-size: 12.5px; text-align: center; padding: 8px 6px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+    color: var(--muted); cursor: pointer;
+  }
+  .tab.active { color: var(--ink); border-color: var(--optimised); background: rgba(57,135,229,0.12); }
+
+  label { display: block; font-size: 12.5px; color: var(--ink-2); margin: 12px 0 5px; }
+  input, select {
+    width: 100%; font: inherit; font-size: 13.5px;
+    background: var(--surface-2); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px;
+  }
+  button {
+    width: 100%; margin-top: 18px; font: inherit; font-size: 13.5px; font-weight: 600;
+    background: var(--optimised); border: 1px solid var(--optimised); color: #fff;
+    border-radius: 8px; padding: 10px; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.12); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .msg { font-size: 12.5px; border-radius: 8px; padding: 9px 11px; margin-top: 14px; }
+  .msg.err { color: var(--critical); background: rgba(208,59,59,0.10); border: 1px solid rgba(208,59,59,0.35); }
+  .msg.ok  { color: var(--good); background: rgba(12,163,12,0.10); border: 1px solid rgba(12,163,12,0.35); }
+  .hidden { display: none; }
+  .foot { font-size: 11.5px; color: var(--muted); margin-top: 16px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <div class="brand">
+    <div class="mark">M</div>
+    <div>
+      <h1>MediMatrx</h1>
+      <div class="sub">Hospital staff sign-in</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="login">Log in</div>
+    <div class="tab" data-panel="register">Register</div>
+    <div class="tab" data-panel="verify">Verify</div>
+  </div>
+
+  <!-- ---------------- LOG IN ---------------- -->
+  <form id="login-form" data-panel="login">
+    <label for="login-username">Username</label>
+    <input id="login-username" required autocomplete="username">
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" required autocomplete="current-password">
+    <button type="submit">Log in</button>
+    <div id="login-msg"></div>
+  </form>
+
+  <!-- ---------------- REGISTER ---------------- -->
+  <form id="register-form" data-panel="register" class="hidden">
+    <label for="reg-username">Username</label>
+    <input id="reg-username" required minlength="3" maxlength="32" autocomplete="username">
+    <label for="reg-email">Email</label>
+    <input id="reg-email" type="email" required>
+    <label for="reg-password">Password</label>
+    <input id="reg-password" type="password" required minlength="8" autocomplete="new-password">
+    <label for="reg-role">Role</label>
+    <select id="reg-role">
+      <option value="staff">Staff (can load data and act)</option>
+      <option value="viewer">Viewer (read-only)</option>
+    </select>
+    <button type="submit">Register</button>
+    <div id="register-msg"></div>
+  </form>
+
+  <!-- ---------------- VERIFY ---------------- -->
+  <form id="verify-form" data-panel="verify" class="hidden">
+    <p class="foot" style="margin-top:0">
+      There is no mail server in this demo, so your code was shown right after
+      registering. Paste your user ID and code below to activate the account.
+    </p>
+    <label for="verify-user-id">User ID</label>
+    <input id="verify-user-id" required>
+    <label for="verify-code">Verification code</label>
+    <input id="verify-code" required inputmode="numeric" maxlength="6">
+    <button type="submit">Verify</button>
+    <div id="verify-msg"></div>
+  </form>
+
+  <div class="foot">Every action beyond sign-in runs through authorization-service.</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function showPanel(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === name));
+  document.querySelectorAll('form').forEach(f => f.classList.toggle('hidden', f.dataset.panel !== name));
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showPanel(t.dataset.panel)));
+
+function showMsg(id, text, ok) {
+  const el = $(id);
+  el.textContent = text;
+  el.className = 'msg ' + (ok ? 'ok' : 'err');
+}
+
+async function postJSON(url, payload) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await r.json().catch(() => ({}));
+  return { ok: r.ok, body };
+}
+
+$('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('login-msg').textContent = '';
+  const { ok, body } = await postJSON('/api/auth/login', {
+    username: $('login-username').value.trim(),
+    password: $('login-password').value
+  });
+  if (!ok) {
+    return showMsg('login-msg', body.detail || body.error || 'Login failed.', false);
+  }
+  localStorage.setItem('medimatrx_token', body.token);
+  localStorage.setItem('medimatrx_username', body.username);
+  localStorage.setItem('medimatrx_role', body.role);
+  window.location.href = '/';
+});
+
+$('register-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('register-msg').textContent = '';
+  const { ok, body } = await postJSON('/api/auth/register', {
+    username: $('reg-username').value.trim(),
+    email: $('reg-email').value.trim(),
+    password: $('reg-password').value,
+    role: $('reg-role').value
+  });
+  if (!ok) {
+    const detail = Array.isArray(body.errors) ? body.errors.join('; ') : (body.detail || body.error);
+    return showMsg('register-msg', detail || 'Registration failed.', false);
+  }
+  showMsg('register-msg', `Registered. Verification code: ${body.verification_code || '(check with an administrator)'}`, true);
+  $('verify-user-id').value = body.user_id || '';
+  $('verify-code').value = body.verification_code || '';
+  showPanel('verify');
+});
+
+$('verify-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('verify-msg').textContent = '';
+  const { ok, body } = await postJSON('/api/auth/verify', {
+    user_id: $('verify-user-id').value.trim(),
+    code: $('verify-code').value.trim()
+  });
+  if (!ok) {
+    return showMsg('verify-msg', body.detail || body.error || 'Verification failed.', false);
+  }
+  showMsg('verify-msg', 'Account verified. You can log in now.', true);
+  setTimeout(() => showPanel('login'), 1200);
+});
+
+// Already signed in? Skip straight back to the dashboard.
+if (localStorage.getItem('medimatrx_token')) {
+  window.location.href = '/';
+}
+</script>
+</body>
+</html>

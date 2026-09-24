@@ -1,0 +1,107 @@
+# ===========================================================================
+#  VALIDATION SERVICE - stateless input checker, called by the gateway
+#  before it forwards a registration or a meter reading to the service
+#  that owns that data.
+# ===========================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: validation-service
+  namespace: medimatrx
+  labels:
+    app: validation
+spec:
+  type: ClusterIP
+  selector:
+    app: validation
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: validation
+  namespace: medimatrx
+  labels:
+    app: validation
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: validation
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: validation
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: validation
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: validation
+          image: abhinavannareddy/medimatrx-validation:1.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: medimatrx-config
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,281 +1,329 @@
-# MediMatrix — Diabetes Risk Predictor (Cloud-Native Microservices)
+# MediMatrx: Hospital Energy Optimisation Platform
 
-A cloud-native, microservices-based application that predicts diabetes risk from
-patient health data. The system is built for Docker Compose (local development)
-and Kubernetes (production-style deployment), and is made up of seven
-independently deployable services.
+A microservice application that cuts a hospital's electricity bill by moving
+deferrable work into cheap-electricity hours, **without ever touching clinical
+load**.
+
+Built for the Cloud Computing assignment at Blekinge Institute of Technology.
+Uses **live Swedish electricity spot prices** from the public
+[elprisetjustnu.se](https://www.elprisetjustnu.se) API and **live weather
+forecasts** from [Open-Meteo](https://open-meteo.com). Neither needs an API key,
+so the whole system runs with no credentials of any kind.
+
+---
+
+## What it does
+
+Swedish electricity is priced hourly on a day-ahead market, and the cheapest hour
+of the day typically costs about a third of the most expensive hour. Hospitals
+run 24/7 and spend 8-15 MSEK a year on power, but only part of that load is
+negotiable.
+
+MediMatrx separates the two:
+
+- **Clinical load**: ICU, operating theatres, imaging, wards. Never touched.
+  This is enforced server-side, in the optimizer, where a user interface cannot
+  bypass it.
+- **Deferrable load**: laundry, sterilisation, catering, HVAC pre-cooling. The
+  work still happens today; *when* it happens is a choice.
+
+It then reports the money saved, the reduction in peak demand (a separate bill),
+the carbon avoided, and any equipment behaving like it is about to fail.
+
+On the demo dataset: **~12% off the energy bill plus a peak-demand reduction, in the order of 1.3-1.6 MSEK per year for a single hospital.**
+
+---
 
 ## Architecture
 
 ```
-                    +-------------+
-                    |  Frontend   |
-                    |  (Flask UI) |
-                    +------+------+
-                           |
-      +--------------------+--------------------+
-      |                    |                     |
-      v                    v                     v
-+-------------+    +----------------+    +----------------------+
-| auth-service|    | verification-  |    |       backend         |
-| (login/     |<-->|   service      |    |   (ML prediction)     |
-|  register)  |    | (OTP codes)    |    |                        |
-+------+------+    +--------+-------+    +----+--------------+---+
-       |                    |                 |              |
-       |                    |                 v              v
-       |                    |        +----------------+  +----------------+
-       |                    |        | authorization- |  | validation-    |
-       |                    |        |   service      |  |   service      |
-       |                    |        +----------------+  +----------------+
-       |                    |
-       +---------+----------+
-                 v
-          +-------------+
-          |  PostgreSQL |
-          |  (db)       |
-          +-------------+
+Browser ──► API Gateway (Node.js) ──┬──► Ingest Service (Node.js) ──► MongoDB
+             NodePort :30080        │         owns the data          StatefulSet
+             the only way in        │                                    + PVC
+                                    ├──► Price Service (Python) ──► elprisetjustnu.se
+                                    │         caches 15 min            (public API)
+                                    │
+                                    ├──► Optimizer Service (Python)
+                                    │         stateless brain
+                                    │         calls ingest + price
+                                    │
+                                    ├──► Assistant Service (Python)
+                                    │         natural language, read-only
+                                    │         calls ingest + price + optimizer
+                                    │
+                                    ├──► Forecast Service (Python) ──► Open-Meteo
+                                    │         predicts tomorrow's load    (public API)
+                                    │         from the weather, then asks
+                                    │         the optimizer to plan it
+                                    │
+                                    ├──► Auth Service (Python) ──► MongoDB
+                                    │         registration, login,        (users,
+                                    │         issues JWTs                 verification_codes)
+                                    │
+                                    ├──► Verification Service (Python)
+                                    │         one-time codes, stateless
+                                    │         (delegates storage to auth)
+                                    │
+                                    ├──► Validation Service (Python)
+                                    │         checks a reading / a
+                                    │         registration before it lands
+                                    │
+                                    └──► Authorization Service (Python)
+                                              checks a JWT + role before
+                                              the gateway proxies anywhere
 ```
 
-### Services
+![MediMatrx architecture](docs/architecture-diagram.svg)
 
-| Service | Port | Responsibility |
-|---|---|---|
-| `frontend` | 5000 | Web UI (login, register, verify, prediction form) |
-| `backend` | 5001 | Loads the ML model, runs predictions, calls authorization + validation before every prediction |
-| `auth-service` | 5002 | **Authentication** — registration, login, JWT issuance |
-| `verification-service` | 5003 | **Verification** — generates and confirms one-time account verification codes |
-| `validation-service` | 5004 | **Validation** — checks prediction input is well-formed and clinically plausible |
-| `authorization-service` | 5005 | **Authorization** — decodes the JWT and enforces role-based permissions |
-| `db` | 5432 | PostgreSQL — stores `users`, `verification_codes`, and `predictions` |
+*(The diagram above predates the four identity services; the ASCII diagram and the table below are the current source of truth for them.)*
 
-### Request flow
+| Service | Language | Replicas | Owns state | Role |
+|---|---|---|---|---|
+| **gateway** | Node.js / Express | 2-10 | no | Single public entry point; serves the dashboard; routing, rate limiting, security headers, auth enforcement |
+| **ingest** | Node.js / Express | 2-12 | **MongoDB** (`readings`) | Receives and stores meter readings; serves 24-hour aggregates |
+| **price** | Python / FastAPI | 2-4 | cache only | Fetches live spot prices; caches; degrades gracefully when upstream fails |
+| **optimizer** | Python / FastAPI | 2-15 | no | Computes the load-shifting plan, savings and anomalies |
+| **assistant** | Python / FastAPI | 2-10 | no | Answers questions in plain English, grounded strictly in the other services' APIs |
+| **forecast** | Python / FastAPI | 2-4 | no | Predicts tomorrow's load from the weather forecast, then asks the optimizer to plan it |
+| **auth** | Python / FastAPI | 2-8 | **MongoDB** (`users`, `verification_codes`) | Registers staff accounts, checks credentials, issues JWTs |
+| **verification** | Python / FastAPI | 2-8 | no | Issues and checks one-time account codes; stores nothing itself, asks auth to |
+| **validation** | Python / FastAPI | 2-12 | no | Checks a meter reading or a registration is well-formed before it reaches its owner |
+| **authorization** | Python / FastAPI | 2-10 | no | Decodes a JWT and checks the caller's role against the action attempted |
+| **mongodb** | MongoDB 7.0 | 1 | **yes** | Persistent storage on a PersistentVolumeClaim, shared by ingest and auth |
 
-1. A user **registers** via the frontend → `auth-service` creates the account (unverified)
-   and asks `verification-service` to generate a one-time code.
-2. The user **verifies** the code → `verification-service` marks the account verified.
-3. The user **logs in** → `auth-service` checks the password and issues a JWT.
-4. The user submits the **prediction form** → the frontend sends the JWT + features to
-   `backend`.
-5. `backend` asks `authorization-service` "is this token allowed to `predict`?" and
-   `validation-service` "is this feature vector valid?" before running the model and
-   writing the result to Postgres.
+**Patterns used:** API Gateway · Grounded Assistant (tool-use over own APIs) · Database per Service · Backend for Frontend ·
+Service Discovery · Cache-Aside · Graceful Degradation · Retry with Backoff ·
+Health/Readiness Separation · Bulkhead & Fail-Fast · Stateless Compute ·
+Externalised Configuration · Authentication/Authorization Separation · Least Privilege (NetworkPolicy).
 
-Any failure at steps 4–5 (missing/expired token, wrong role, malformed input) is
-rejected before the ML model ever runs.
+Full design rationale, benefits, challenges and the security analysis are in
+**[`docs/01-REPORT.md`](docs/01-REPORT.md)**.
 
-## Repository structure
+---
 
-```
-/frontend/                  Flask web UI (login, register, verify, predictor)
-/backend/                   Prediction REST API + ML model (diabetes_model.pkl)
-/auth-service/              Authentication microservice
-/verification-service/      Verification microservice
-/validation-service/        Validation microservice
-/authorization-service/     Authorization microservice
-/db/init.sql                Postgres schema (users, verification_codes, predictions)
-/k8s/                        Kubernetes manifests (Deployments, Services, ConfigMap, Secret, PVC)
-/docker-compose.yaml         Local multi-container orchestration
-```
+## Quick start
 
-## Running locally with Docker Compose
+**Prerequisites:** Docker Desktop with Kubernetes enabled, and a free Docker Hub
+account.
 
-Requires Docker Desktop (or Docker Engine + Compose plugin).
+```powershell
+# 1. Build the ten images and push them to your Docker Hub account
+powershell -ExecutionPolicy Bypass -File .\scripts\1-build-and-push.ps1
 
-```bash
-docker compose build
-docker compose up -d
+# 2. Deploy all 61 Kubernetes objects and load a demo day
+powershell -ExecutionPolicy Bypass -File .\scripts\2-deploy.ps1
 ```
 
-This builds and starts all seven services, creates the `db-data` named volume for
-PostgreSQL, and runs `db/init.sql` automatically on first boot to create the schema.
+Then open **http://localhost:30080**
 
-- Frontend: http://localhost:5000
-- Backend API: http://localhost:5001
-- auth-service: http://localhost:5002
-- verification-service: http://localhost:5003
-- validation-service: http://localhost:5004
-- authorization-service: http://localhost:5005
-- Postgres: localhost:5432 (`postgres` / `password`, db `microservices_db`)
+Step-by-step instructions written for a complete beginner, including every way it
+can go wrong: **[`docs/02-RUN-GUIDE.md`](docs/02-RUN-GUIDE.md)**
 
-Check everything is healthy:
+### Without Kubernetes
 
-```bash
-docker compose ps
-docker compose logs -f
+To run the whole system locally in about 30 seconds, useful for telling code
+problems apart from cluster problems:
+
+```powershell
+docker compose up --build
+```
+Then open http://localhost:8080
+
+---
+
+## Demonstrations
+
+```powershell
+# Independent horizontal scaling: scale ONE service, show the others unchanged,
+# then watch 20 requests spread across the new replicas
+powershell -ExecutionPolicy Bypass -File .\scripts\3-demo-scaling.ps1
+
+# Persistent storage: destroy the database pod and show the data survives
+powershell -ExecutionPolicy Bypass -File .\scripts\4-demo-persistence.ps1
 ```
 
-Tear down (and delete the database volume):
+---
 
-```bash
-docker compose down -v
+## Repository layout
+
+```
+medimatrx/
+├── services/
+│   ├── gateway/         Node.js  - API gateway + the dashboard (public/index.html, public/login.html)
+│   ├── ingest/          Node.js  - meter data, MongoDB owner
+│   ├── price/           Python   - live electricity prices
+│   ├── optimizer/       Python   - the optimisation brain
+│   ├── assistant/       Python   - grounded natural-language assistant
+│   ├── forecast/        Python   - weather-driven plan for tomorrow
+│   ├── auth/            Python   - registration, login, JWTs, MongoDB owner
+│   ├── verification/    Python   - one-time account codes (stateless)
+│   ├── validation/      Python   - input checks (stateless)
+│   └── authorization/   Python   - JWT + role checks (stateless)
+├── k8s/
+│   ├── 00-namespace.yaml
+│   ├── 01-config-and-secrets.yaml
+│   ├── 02-mongodb.yaml             StatefulSet + PersistentVolumeClaim
+│   ├── 03-ingest.yaml
+│   ├── 04-price.yaml
+│   ├── 05-optimizer.yaml
+│   ├── 06-gateway.yaml             NodePort (+ commented Ingress)
+│   ├── 07-autoscaling.yaml         10 × HPA, 9 × PodDisruptionBudget
+│   ├── 08-network-policy.yaml      default-deny + explicit allows per service pair
+│   ├── 09-assistant.yaml
+│   ├── 10-forecast.yaml
+│   ├── 11-auth.yaml
+│   ├── 12-verification.yaml
+│   ├── 13-validation.yaml
+│   └── 14-authorization.yaml
+├── scripts/             numbered PowerShell scripts for Windows
+├── docs/
+│   ├── 01-REPORT.md     the assignment report
+│   ├── 02-RUN-GUIDE.md  step-by-step instructions
+│   ├── 04-QA-PREP.md    likely examiner questions and answers
+│   ├── 05-PRODUCT-ROADMAP.md  from demo to product
+│   ├── 06-DEPLOY-STEPS.md     the short deploy checklist
+│   └── architecture-diagram.svg
+└── docker-compose.yml   run everything without Kubernetes
 ```
 
-### Try it end-to-end (curl)
+---
 
-```bash
-# 1. Register
-curl -X POST http://localhost:5002/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","email":"alice@example.com","password":"secret123"}'
-# -> {"user_id": 1, "verification_code": "123456", ...}
+## REST API
 
-# 2. Verify (code comes from the register response — no mail server in this demo)
-curl -X POST http://localhost:5003/confirm \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": 1, "code": "123456"}'
+Everything is reachable through the gateway at `http://localhost:30080`.
 
-# 3. Log in
-curl -X POST http://localhost:5002/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"secret123"}'
-# -> {"token": "<jwt>", "username": "alice", "role": "user"}
+### Consumption (ingest service)
 
-# 4. Predict (token required)
-curl -X POST http://localhost:5001/predict \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <jwt>" \
-  -d '{"features":[2,120,70,20,80,25.5,0.5,30]}'
-# -> {"prediction": "Non-Diabetic"}
+```
+GET  /api/zones                      the nine metered zones
+POST /api/readings                   store a reading  {"zoneId":"icu","kwh":148.2}
+GET  /api/readings?zone=&limit=      raw readings, newest first
+GET  /api/summary                    per-zone, per-hour totals for the last 24h
+POST /api/simulate                   load a realistic demo day (?faults=0 to skip)
 ```
 
-Or just open http://localhost:5000 and use the Register → Verify → Log In → Predict
-flow in the browser.
+### Prices (price service)
 
-## Running on Kubernetes
-
-Requires a running cluster (e.g. Docker Desktop's built-in Kubernetes, or minikube)
-and `kubectl` configured against it.
-
-### 1. Build images
-
-The manifests reference `abhinavannareddy/<service>` images. Build them locally
-(Kubernetes will use the local image if it's already present and
-`imagePullPolicy: IfNotPresent` is set, which every manifest here uses):
-
-```bash
-docker build -t abhinavannareddy/back ./backend
-docker build -t abhinavannareddy/front ./frontend
-docker build -t abhinavannareddy/auth-service ./auth-service
-docker build -t abhinavannareddy/verification-service ./verification-service
-docker build -t abhinavannareddy/validation-service ./validation-service
-docker build -t abhinavannareddy/authorization-service ./authorization-service
+```
+GET  /api/prices?area=SE4            today's 24 hourly prices, live
+GET  /api/prices?area=SE4&day=tomorrow   tomorrow's day-ahead prices
+GET  /api/prices/cheapest-window?hours=3
+GET  /api/stats                      cache and upstream counters
 ```
 
-To deploy on a remote cluster instead of a local one, push these images to a
-registry and update the `image:` field in each `k8s/*-deployment.yaml` accordingly.
+### Optimisation (optimizer service)
 
-### 2. Apply the manifests
-
-```bash
-kubectl apply -f k8s/
+```
+GET  /api/optimize?area=SE4          the plan, the savings, the recommendations
+GET  /api/optimize?flex=laundry:0.9  the same, as a what-if scenario
+POST /api/optimize/scenario          optimise a supplied day, not today's
+GET  /api/anomalies                  equipment faults detected
 ```
 
-This creates:
-- `app-config` (ConfigMap) — non-secret settings (DB host/name/user, internal service URLs)
-- `app-secret` (Secret) — `DB_PASSWORD`, `JWT_SECRET`, frontend `SECRET_KEY`
-- `db-init-sql` (ConfigMap) — the schema, mounted into the Postgres pod's
-  `/docker-entrypoint-initdb.d` so tables are created automatically on first boot
-- A Deployment + Service for each of: `db`, `backend`, `frontend`, `auth-service`,
-  `verification-service`, `validation-service`, `authorization-service`
-- `db-pvc` (PersistentVolumeClaim) — durable storage for PostgreSQL
+### Assistant (assistant service)
 
-### 3. Check status
-
-```bash
-kubectl get pods
-kubectl get svc
+```
+POST /api/chat                       {"message": "why move the laundry?"}
+GET  /api/chat/suggestions           starter questions
 ```
 
-All pods should reach `1/1 Running`. Every service has liveness/readiness probes
-(HTTP `/health` for the app services, `pg_isready` for Postgres).
+The assistant is **read-only** and answers only from the APIs above. It runs a
+deterministic intent engine by default, so it needs no LLM key, no internet
+and no per-question cost, and it cannot invent a number. An LLM is optional
+and only rephrases an answer that has already been computed from real data;
+if that call fails the deterministic answer is returned instead.
 
-### 4. Reach the app
+### Forecast (forecast service)
 
-`frontend` is a `LoadBalancer` Service. On Docker Desktop's Kubernetes this is
-reachable directly at http://localhost:5000. On minikube, run:
-
-```bash
-minikube service frontend --url
+```
+GET  /api/forecast/weather           today's and tomorrow's hourly temperature
+GET  /api/forecast/plan?area=SE4     tomorrow's predicted load and its plan
 ```
 
-For any service, you can also port-forward directly, e.g.:
+Every plan carries a `confidence` rating and a list of `caveats`. Day-ahead
+prices genuinely do not exist until the market publishes them in the early
+afternoon, so before then the service says so rather than presenting a modelled
+number as if it were a measured one.
 
-```bash
-kubectl port-forward svc/backend 5001:5001
-kubectl port-forward svc/auth-service 5002:5002
+The forecast service holds **no copy of the optimisation algorithm**. It posts
+the day it predicted to the optimizer's scenario endpoint, so today's report and
+tomorrow's plan come out of one implementation and cannot drift apart.
+
+### Identity (auth, verification, authorization services)
+
+```
+POST /api/auth/register              {"username","email","password","role":"staff"|"viewer"}
+POST /api/auth/verify                {"user_id","code"}   - confirm the one-time code
+POST /api/auth/login                 {"username","password"} -> {"token","username","role"}
 ```
 
-### Teardown
+These three are the only `/api` routes that do **not** require a bearer token -
+you cannot be authorized before you have an identity to check. Every other
+route requires `Authorization: Bearer <token>`; the gateway checks it against
+`authorization-service` before proxying anywhere. `staff` may read and write
+(load demo data, store a reading); `viewer` may only read. See
+[`services/auth/main.py`](services/auth/main.py),
+[`services/verification/main.py`](services/verification/main.py) and
+[`services/authorization/main.py`](services/authorization/main.py).
 
-```bash
-kubectl delete -f k8s/
+### Validation (validation service)
+
+Not called directly by a browser - the gateway calls it before forwarding a
+registration or a meter reading, and rejects the request with a 400 and a
+list of `errors` if it fails. See
+[`services/validation/main.py`](services/validation/main.py).
+
+### Operational
+
+```
+GET  /healthz                        liveness  - on every service
+GET  /readyz                         readiness - on every service
+GET  /api/topology                   which pod is serving each service
 ```
 
-## Configuration
+---
 
-All configuration is environment-variable driven — nothing is hardcoded in the
-images. In Docker Compose these are set directly in `docker-compose.yaml`; in
-Kubernetes they come from the `app-config` ConfigMap and `app-secret` Secret.
+## Requirements checklist
 
-| Variable | Used by | Purpose |
-|---|---|---|
-| `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | backend, auth-service, verification-service, db | PostgreSQL connection |
-| `JWT_SECRET` | auth-service, authorization-service | Shared secret for signing/verifying JWTs |
-| `JWT_EXPIRY_MINUTES` | auth-service | Token lifetime (default 60) |
-| `SECRET_KEY` | frontend | Flask session signing key |
-| `AUTH_SERVICE_URL`, `VERIFICATION_SERVICE_URL`, `VALIDATION_SERVICE_URL`, `AUTHORIZATION_SERVICE_URL`, `BACKEND_URL` | frontend, backend, auth-service | Internal service discovery (Compose service names / Kubernetes Service names) |
+| Requirement | Where it is met |
+|---|---|
+| Deployable using Kubernetes | `k8s/`, 61 objects across 15 files |
+| At least two types of microservice + a database | Ten services in two languages + MongoDB |
+| Each microservice implements a REST API | See the API section above |
+| Accessible from outside Kubernetes | NodePort 30080 in a web browser |
+| All microservices independently horizontally scalable | 10 separate HPAs in `07-autoscaling.yaml` |
+| Images pushed to Docker Hub | `scripts/1-build-and-push.ps1` |
+| Database as a separate microservice | MongoDB StatefulSet |
+| Storage persistent across restarts | `volumeClaimTemplates`, proven by `scripts/4-demo-persistence.ps1` |
+| Programmatically connect to and use a REST API | Price service → elprisetjustnu.se; optimizer → ingest + price |
+| Authentication, authorization, verification, validation | Four dedicated services - see the Identity/Validation API sections above |
+| Acknowledge if too small to warrant scaling | `docs/01-REPORT.md` §1, "Scale, honestly" |
 
-For a real deployment, replace the demo values of `JWT_SECRET`, `SECRET_KEY` and
-`DB_PASSWORD` in `k8s/app-secret.yaml` with your own secrets before applying.
+---
 
-## API reference
+## Known limitations
 
-### auth-service (authentication) — port 5002
+Stated openly, with the fix, in `docs/01-REPORT.md` §5 and §6:
 
-| Method & Path | Body | Response |
-|---|---|---|
-| `POST /register` | `{username, email, password}` | `201` `{user_id, verification_code}` — creates an unverified user and triggers `verification-service` |
-| `POST /login` | `{username, password}` | `200` `{token, username, role}` — fails with `403` if the account isn't verified yet |
-| `GET /health` | — | `{status: "ok"}` |
+- **Role is self-declared at registration** (`staff` or `viewer`), not
+  administrator-approved. Fine for a coursework demo; a real deployment would
+  have an administrator assign roles instead.
+- **No email server**: the verification code is returned directly in the
+  register/login response rather than emailed. Fix: plug in a real mail
+  provider behind verification-service; nothing else would need to change.
+- **Plain HTTP inside the cluster**. Fix: a service mesh with mutual TLS.
+- **Kubernetes Secrets are base64, not encrypted**. Fix: an external vault with
+  rotating credentials.
+- **NetworkPolicies are not enforced on Docker Desktop**: the objects are correct
+  but its default CNI ignores them. Enforced on Calico or Cilium.
+- **Rate limiting is per-pod**, so the real limit is (limit × replicas). Fix:
+  Redis, or rate limit at the ingress.
+- **Single MongoDB pod**: a single point of failure, accepted because the
+  assignment states the database need not be scalable. Fix: a three-member replica
+  set with tested backups.
 
-### verification-service (verification) — port 5003
+---
 
-| Method & Path | Body | Response |
-|---|---|---|
-| `POST /generate` | `{user_id}` | `201` `{code, expires_at}` — issues a 6-digit code, valid 15 minutes |
-| `POST /confirm` | `{user_id, code}` | `200` `{verified: true}` — marks the user verified, or `400` on an invalid/expired code |
-| `GET /health` | — | `{status: "ok"}` |
+## Licence
 
-### validation-service (validation) — port 5004
-
-| Method & Path | Body | Response |
-|---|---|---|
-| `POST /validate` | `{features: [pregnancies, glucose, blood_pressure, skin_thickness, insulin, bmi, dpf, age]}` | `200` `{valid: true}` or `400` `{valid: false, errors: [...]}` — checks each field is numeric and within a clinically plausible range |
-| `GET /health` | — | `{status: "ok"}` |
-
-### authorization-service (authorization) — port 5005
-
-| Method & Path | Body | Response |
-|---|---|---|
-| `POST /authorize` | `{token, action}` | `200` `{authorized: true, username, role}`, or `401`/`403` with an error if the token is invalid/expired or the role lacks permission |
-| `GET /health` | — | `{status: "ok"}` |
-
-### backend (prediction API) — port 5001
-
-| Method & Path | Headers / Body | Response |
-|---|---|---|
-| `POST /predict` | `Authorization: Bearer <jwt>`, body `{features: [...]}` | `200` `{prediction: "Diabetic" \| "Non-Diabetic"}` after passing authorization + validation checks; stores the result in `predictions` |
-| `GET /health` | — | `{status: "ok"}` |
-
-## Security notes
-
-- Passwords are hashed with Werkzeug's `generate_password_hash` (PBKDF2) — never
-  stored in plaintext.
-- JWTs are signed with `HS256` using a secret shared only between `auth-service`
-  (which issues them) and `authorization-service` (which verifies them); no other
-  service can mint a valid token.
-- Accounts must be verified before they can log in.
-- Secrets (`DB_PASSWORD`, `JWT_SECRET`, `SECRET_KEY`) live in a Kubernetes `Secret`,
-  not in source code or the ConfigMap.
-- `validation-service` rejects malformed/out-of-range input before it ever reaches
-  the ML model or the database, mitigating injection/garbage-input attacks.
+MIT licence. Coursework project.

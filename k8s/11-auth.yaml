@@ -1,0 +1,115 @@
+# ===========================================================================
+#  AUTH SERVICE - the only service that owns the users and
+#  verification_codes collections in MongoDB.
+#
+#  Like ingest, this is a "Database per Service" owner, so it is allowed a
+#  direct line to mongodb (see 08-network-policy.yaml, rule 7b). Unlike
+#  ingest it is not on the hot path for the dashboard, so 2 replicas is
+#  enough headroom rather than a high ceiling.
+# ===========================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: medimatrx
+  labels:
+    app: auth
+spec:
+  type: ClusterIP
+  selector:
+    app: auth
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: medimatrx
+  labels:
+    app: auth
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: auth
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: auth
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: auth
+          image: abhinavannareddy/medimatrx-auth:1.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: medimatrx-config
+            - secretRef:
+                name: medimatrx-db-credentials
+            - secretRef:
+                name: medimatrx-identity
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

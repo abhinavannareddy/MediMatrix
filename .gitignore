@@ -1,4 +1,11 @@
-venv/
+node_modules/
 __pycache__/
 *.pyc
 .env
+*.log
+.DS_Store
+.venv/
+venv/
+
+# Personal working notes, not part of the submitted repository
+docs/03-VIDEO-SCRIPT.md

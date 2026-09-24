@@ -1,0 +1,183 @@
+# ===========================================================================
+#  Docker Compose - run the whole system on your laptop WITHOUT Kubernetes.
+#
+#  Why this file exists: Kubernetes is the assignment, but when something
+#  does not work you want to find out whether it is your CODE or your
+#  CLUSTER. Compose runs the same four containers plus MongoDB in about 30
+#  seconds, with no cluster involved. If it works here and not in Kubernetes,
+#  the problem is in the YAML. If it fails here too, the problem is the code.
+#
+#  Run it:      docker compose up --build
+#  Then open:   http://localhost:8080
+#  Stop it:     docker compose down
+#  Wipe data:   docker compose down -v
+# ===========================================================================
+
+services:
+
+  mongodb:
+    image: mongo:7.0
+    container_name: medimatrx-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: medimatrx
+      MONGO_INITDB_ROOT_PASSWORD: devpassword
+    volumes:
+      # A named volume - the same idea as a PersistentVolumeClaim in
+      # Kubernetes. Data survives "docker compose down".
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  ingest:
+    build: ./services/ingest
+    container_name: medimatrx-ingest
+    environment:
+      PORT: "8080"
+      POD_NAME: "ingest-local-1"
+      MONGO_HOST: "mongodb:27017"
+      MONGO_DB: "medimatrx"
+      MONGO_USER: "medimatrx"
+      MONGO_PASSWORD: "devpassword"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  price:
+    build: ./services/price
+    container_name: medimatrx-price
+    environment:
+      POD_NAME: "price-local-1"
+      PRICE_AREA: "SE4"
+      CACHE_TTL_SECONDS: "900"
+      TZ: "Europe/Stockholm"
+
+  optimizer:
+    build: ./services/optimizer
+    container_name: medimatrx-optimizer
+    environment:
+      POD_NAME: "optimizer-local-1"
+      INGEST_URL: "http://ingest:8080"
+      PRICE_URL: "http://price:8080"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      - ingest
+      - price
+
+  assistant:
+    build: ./services/assistant
+    container_name: medimatrx-assistant
+    environment:
+      POD_NAME: "assistant-local-1"
+      INGEST_URL: "http://ingest:8080"
+      PRICE_URL: "http://price:8080"
+      OPTIMIZER_URL: "http://optimizer:8080"
+      TZ: "Europe/Stockholm"
+      # Optional. Leave unset and the deterministic engine is used.
+      # LLM_PROVIDER: "anthropic"
+      # LLM_API_KEY: "sk-..."
+    depends_on:
+      - ingest
+      - price
+      - optimizer
+
+  forecast:
+    build: ./services/forecast
+    container_name: medimatrx-forecast
+    environment:
+      POD_NAME: "forecast-local-1"
+      INGEST_URL: "http://ingest:8080"
+      PRICE_URL: "http://price:8080"
+      OPTIMIZER_URL: "http://optimizer:8080"
+      SITE_NAME: "Blekinge Regional Hospital"
+      SITE_LAT: "56.1612"
+      SITE_LON: "15.5869"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      - ingest
+      - price
+      - optimizer
+
+  auth:
+    build: ./services/auth
+    container_name: medimatrx-auth
+    environment:
+      POD_NAME: "auth-local-1"
+      MONGO_HOST: "mongodb:27017"
+      MONGO_DB: "medimatrx"
+      MONGO_USER: "medimatrx"
+      MONGO_PASSWORD: "devpassword"
+      JWT_SECRET: "dev-jwt-secret-change-me"
+      INTERNAL_TOKEN: "dev-internal-token-change-me"
+      VERIFICATION_URL: "http://verification:8080"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  verification:
+    build: ./services/verification
+    container_name: medimatrx-verification
+    environment:
+      POD_NAME: "verification-local-1"
+      AUTH_URL: "http://auth:8080"
+      INTERNAL_TOKEN: "dev-internal-token-change-me"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      - auth
+
+  validation:
+    build: ./services/validation
+    container_name: medimatrx-validation
+    environment:
+      POD_NAME: "validation-local-1"
+      INGEST_URL: "http://ingest:8080"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      - ingest
+
+  authorization:
+    build: ./services/authorization
+    container_name: medimatrx-authorization
+    environment:
+      POD_NAME: "authorization-local-1"
+      JWT_SECRET: "dev-jwt-secret-change-me"
+      TZ: "Europe/Stockholm"
+
+  gateway:
+    build: ./services/gateway
+    container_name: medimatrx-gateway
+    ports:
+      # The ONLY port published to your laptop. Exactly like the NodePort
+      # in Kubernetes: one door in, everything else stays private.
+      - "8080:8080"
+    environment:
+      POD_NAME: "gateway-local-1"
+      INGEST_URL: "http://ingest:8080"
+      PRICE_URL: "http://price:8080"
+      OPTIMIZER_URL: "http://optimizer:8080"
+      ASSISTANT_URL: "http://assistant:8080"
+      FORECAST_URL: "http://forecast:8080"
+      AUTH_URL: "http://auth:8080"
+      VERIFICATION_URL: "http://verification:8080"
+      VALIDATION_URL: "http://validation:8080"
+      AUTHORIZATION_URL: "http://authorization:8080"
+      RATE_LIMIT: "600"
+      TZ: "Europe/Stockholm"
+    depends_on:
+      - ingest
+      - price
+      - optimizer
+      - assistant
+      - forecast
+      - auth
+      - verification
+      - validation
+      - authorization
+
+volumes:
+  mongo-data:

@@ -1,0 +1,150 @@
+# ===========================================================================
+#  ASSISTANT SERVICE - the natural-language layer
+#
+#  This is the fifth microservice, and it follows exactly the same rules as
+#  the other four: stateless, ClusterIP only, no database of its own, and it
+#  reaches its siblings over REST through Kubernetes DNS.
+#
+#  Two things about it are deliberate and worth saying out loud:
+#
+#  1) It is READ-ONLY. It has no tool that writes anything. In a clinical
+#     setting, a natural-language layer that can change state is a liability.
+#
+#  2) It works with NO external dependency. The default engine is
+#     deterministic intent matching over our own APIs, so it needs no LLM
+#     key, no internet and no per-question cost, and it cannot hallucinate a
+#     number. An LLM is optional and only rephrases an answer that has
+#     already been computed from real data.
+# ===========================================================================
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: assistant-service
+  namespace: medimatrx
+  labels:
+    app: assistant
+spec:
+  type: ClusterIP
+  selector:
+    app: assistant
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assistant
+  namespace: medimatrx
+  labels:
+    app: assistant
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: assistant
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: assistant
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: assistant
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: assistant
+          image: abhinavannareddy/medimatrx-assistant:1.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # --- Optional LLM key -------------------------------------------
+            # optional: true means the pod starts perfectly well when this
+            # Secret does not exist, which is the normal case. The assistant
+            # then runs its deterministic engine and nothing is degraded.
+            #
+            # To switch an LLM on later:
+            #   kubectl create secret generic medimatrx-llm -n medimatrx \
+            #     --from-literal=LLM_API_KEY=sk-... \
+            #     --from-literal=LLM_PROVIDER=anthropic
+            #   kubectl rollout restart deployment/assistant -n medimatrx
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: medimatrx-llm
+                  key: LLM_API_KEY
+                  optional: true
+            - name: LLM_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: medimatrx-llm
+                  key: LLM_PROVIDER
+                  optional: true
+            - name: LLM_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: medimatrx-llm
+                  key: LLM_MODEL
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: medimatrx-config
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
