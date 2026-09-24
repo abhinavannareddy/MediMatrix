@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend
+  name: auth-service
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: backend
+      app: auth-service
   template:
     metadata:
       labels:
-        app: backend
+        app: auth-service
     spec:
       containers:
-      - name: backend
-        image: abhinavannareddy/back
+      - name: auth-service
+        image: abhinavannareddy/auth-service
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 5001
+        - containerPort: 5002
         env:
         - name: DB_HOST
           valueFrom:
@@ -39,25 +39,25 @@ spec:
             secretKeyRef:
               name: app-secret
               key: DB_PASSWORD
-        - name: AUTHORIZATION_SERVICE_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: JWT_SECRET
+        - name: VERIFICATION_SERVICE_URL
           valueFrom:
             configMapKeyRef:
               name: app-config
-              key: AUTHORIZATION_SERVICE_URL
-        - name: VALIDATION_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: VALIDATION_SERVICE_URL
+              key: VERIFICATION_SERVICE_URL
         readinessProbe:
           httpGet:
             path: /health
-            port: 5001
+            port: 5002
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /health
-            port: 5001
+            port: 5002
           initialDelaySeconds: 10
           periodSeconds: 15

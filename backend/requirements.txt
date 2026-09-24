@@ -9,3 +9,4 @@ scikit-learn
 waitress
 pymongo
 Werkzeug
+requests

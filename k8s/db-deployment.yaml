@@ -19,15 +19,43 @@ spec:
         - containerPort: 5432
         env:
         - name: POSTGRES_DB
-          value: microservices_db
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_NAME
         - name: POSTGRES_USER
-          value: postgres
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_USER
         - name: POSTGRES_PASSWORD
-          value: password
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: DB_PASSWORD
+        - name: PGDATA
+          # Postgres refuses to initialize when the mount point itself is non-empty
+          # (PVC volumes surface a lost+found dir), so point it at a subdirectory.
+          value: /var/lib/postgresql/data/pgdata
         volumeMounts:
         - mountPath: /var/lib/postgresql/data
           name: db-storage
+        - mountPath: /docker-entrypoint-initdb.d
+          name: db-init
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 15
+          periodSeconds: 10
       volumes:
       - name: db-storage
         persistentVolumeClaim:
           claimName: db-pvc
+      - name: db-init
+        configMap:
+          name: db-init-sql

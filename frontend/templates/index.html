@@ -103,9 +103,16 @@
                             likely <strong>Diabetic</strong> or <strong>Non-Diabetic</strong>.
                         </p>
                     </div>
-                    <div class="pill">
-                        <span class="badge-dot"></span>
-                        ML Model
+                    <div class="d-flex flex-column align-items-end gap-2">
+                        <div class="pill">
+                            <span class="badge-dot"></span>
+                            ML Model
+                        </div>
+                        {% if username %}
+                            <div class="helper-text">
+                                {{ username }} · <a href="{{ url_for('logout') }}" class="text-decoration-none">Log out</a>
+                            </div>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="card-body px-4 pb-4 pt-3">
