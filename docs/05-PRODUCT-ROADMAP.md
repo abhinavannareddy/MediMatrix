@@ -9,7 +9,7 @@ contract for. Ordered by business value, not by how interesting it is to build.
 
 Shipped and working:
 
-- Five independently scalable microservices, MongoDB on persistent storage
+- Ten independently scalable microservices, MongoDB on persistent storage
 - Live Swedish spot prices with graceful degradation when the upstream fails
 - Load-shifting optimiser with a hard clinical-safety rule enforced server-side
 - Neighbour-comparison anomaly detection for equipment faults
@@ -53,12 +53,15 @@ transforms how the product is perceived.
 Organisations, sites, zones. Without it, customer number two needs a second
 deployment. This is the difference between a project and a SaaS business.
 
-### 4. Authentication, authorisation and TLS
+### 4. Enterprise identity and transport security
 
-Already documented as gaps in the report. OIDC against the hospital's identity
-provider, role-based access so estates staff read and only service accounts
-write, mutual TLS for meter endpoints. Nothing gets past hospital IT without
-these.
+Basic authentication and authorisation already exist (dedicated auth and
+authorization services, JWTs, `staff`/`viewer` roles), and are documented in
+the report along with what is still missing. What a hospital deployment would
+still need: OIDC/SSO against the hospital's own identity provider instead of
+self-registration, an administrator-approval step before an account gets the
+`staff` role, mutual TLS between pods, and TLS termination at the edge.
+Nothing gets past hospital IT without these.
 
 ### 5. Audit logging
 

@@ -1,5 +1,5 @@
 # ===========================================================================
-#  STEP 1 - Build the six container images and push them to Docker Hub.
+#  STEP 1 - Build the ten container images and push them to Docker Hub.
 #
 #  Run this from the project folder in PowerShell:
 #     powershell -ExecutionPolicy Bypass -File .\scripts\1-build-and-push.ps1
@@ -7,7 +7,7 @@
 #  What it does, in order:
 #     1. asks for your Docker Hub username
 #     2. logs you in to Docker Hub
-#     3. builds each of the six services into an image
+#     3. builds each of the ten services into an image
 #     4. pushes each image to your Docker Hub account
 #     5. writes your username into the Kubernetes YAML files, so they
 #        point at YOUR images instead of the DOCKERHUB_USER placeholder

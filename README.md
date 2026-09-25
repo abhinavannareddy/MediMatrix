@@ -75,8 +75,6 @@ Browser ──► API Gateway (Node.js) ──┬──► Ingest Service (Node.
 
 ![MediMatrx architecture](docs/architecture-diagram.svg)
 
-*(The diagram above predates the four identity services; the ASCII diagram and the table below are the current source of truth for them.)*
-
 | Service | Language | Replicas | Owns state | Role |
 |---|---|---|---|---|
 | **gateway** | Node.js / Express | 2-10 | no | Single public entry point; serves the dashboard; routing, rate limiting, security headers, auth enforcement |
@@ -91,7 +89,7 @@ Browser ──► API Gateway (Node.js) ──┬──► Ingest Service (Node.
 | **authorization** | Python / FastAPI | 2-10 | no | Decodes a JWT and checks the caller's role against the action attempted |
 | **mongodb** | MongoDB 7.0 | 1 | **yes** | Persistent storage on a PersistentVolumeClaim, shared by ingest and auth |
 
-**Patterns used:** API Gateway · Grounded Assistant (tool-use over own APIs) · Database per Service · Backend for Frontend ·
+**Patterns used:** API Gateway · Grounded Assistant (tool-use over own APIs) · Service-Owned Collections (shared MongoDB) · Backend for Frontend ·
 Service Discovery · Cache-Aside · Graceful Degradation · Retry with Backoff ·
 Health/Readiness Separation · Bulkhead & Fail-Fast · Stateless Compute ·
 Externalised Configuration · Authentication/Authorization Separation · Least Privilege (NetworkPolicy).
@@ -179,10 +177,12 @@ medimatrx/
 ├── docs/
 │   ├── 01-REPORT.md     the assignment report
 │   ├── 02-RUN-GUIDE.md  step-by-step instructions
+│   ├── 03-VIDEO-SCRIPT.md     shot-by-shot demo video script
 │   ├── 04-QA-PREP.md    likely examiner questions and answers
 │   ├── 05-PRODUCT-ROADMAP.md  from demo to product
 │   ├── 06-DEPLOY-STEPS.md     the short deploy checklist
-│   └── architecture-diagram.svg
+│   ├── MediMatrx-IEEE.tex     IEEE conference format version of the report
+│   └── architecture-diagram.svg (+ .png, .pdf exports)
 └── docker-compose.yml   run everything without Kubernetes
 ```
 

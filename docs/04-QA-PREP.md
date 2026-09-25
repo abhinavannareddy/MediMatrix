@@ -57,16 +57,17 @@ hours do not share.
 
 ### 4. What each Kubernetes file does
 
-Nine files. You should be able to say each one in a sentence: namespace,
-config+secrets, MongoDB, then one per service, then autoscaling, then network
-policy.
+Fifteen files. You should be able to say each one in a sentence: namespace,
+config+secrets, MongoDB, then one per service (ingest, price, optimizer,
+gateway, assistant, forecast, auth, verification, validation, authorization),
+then autoscaling, then network policy.
 
 ### 5. Where the two "REST API" requirements are met
 
 - *"programmatically connect to and use a REST API"* → the **price service**
-  calling `elprisetjustnu.se` with `httpx`, and the **optimizer** calling ingest
-  and price.
-- *"program a microservice that provides a REST API"* → all six services
+  calling `elprisetjustnu.se` with `httpx`, the **forecast service** calling
+  Open-Meteo, and the **optimizer** calling ingest and price.
+- *"program a microservice that provides a REST API"* → all ten services
   provide one.
 
 ---
@@ -110,19 +111,25 @@ policy.
 
 ## Part 2: Architecture design decisions
 
-**"Why six microservices and not one application?"**
+**"Why ten microservices and not one application?"**
 
-> Because the three workloads scale with completely different things. Ingest
+> Because the workloads scale with completely different things. Ingest
 > scales with the number of meters. The optimizer scales with the number of sites
 > being re-planned. The price service doesn't scale at all, because the price is
 > identical for everyone in a bidding area. One cache serves a thousand
-> hospitals. In a monolith I'd have to scale all three to relieve any one of them,
+> hospitals. In a monolith I'd have to scale all of them to relieve any one of them,
 > and I'd be paying for it.
 >
 > The second reason is deployment risk. The optimisation algorithm is where the
 > product's value is, so it's what changes most often. Because it's separate and
 > stateless, I can redeploy it several times a day without touching the service
 > that must never lose a meter reading.
+>
+> The other four (auth, verification, validation, authorization) exist because
+> identity has its own separation of concerns: who you are, whether your code was
+> confirmed, whether your input is well-formed, and what your role permits are
+> four different questions, and keeping them as four services means a change to
+> one never risks the other three.
 
 **"Isn't this over-engineered for a student project?"**
 
@@ -192,8 +199,8 @@ policy.
 
 **"What's the risk of this architecture to the business?"**
 
-> Operational complexity is a real risk for a small company. Thirty Kubernetes
-> objects and six images need a build pipeline and someone on call. If MediMatrx
+> Operational complexity is a real risk for a small company. Sixty-one Kubernetes
+> objects and ten images need a build pipeline and someone on call. If MediMatrx
 > were a startup with two engineers, I'd probably start as a modular monolith and
 > split out the optimizer first, when the scaling pressure actually appeared. The
 > architecture I've built is the *destination*, and I'd be honest with an
@@ -254,10 +261,12 @@ Use the flow from Part 0, question 1. Then add:
 **"Could a service talk to another service's database?"**
 
 > Technically no, and I enforce it in two places. Architecturally, only ingest
-> has the MongoDB connection code. And at the network layer, the `mongodb-ingress`
-> NetworkPolicy means only pods labelled `app: ingest` can even open a TCP
-> connection to port 27017. An attacker who stole the password from a compromised
-> optimizer pod would find the network refusing them.
+> and auth have MongoDB connection code, and each only touches its own
+> collections: ingest never opens `users`, auth never opens `readings`. And at
+> the network layer, the `mongodb-ingress` NetworkPolicy means only pods
+> labelled `app: ingest` or `app: auth` can even open a TCP connection to port
+> 27017. An attacker who stole the password from a compromised optimizer pod
+> would find the network refusing them.
 
 ---
 
@@ -266,22 +275,23 @@ Use the flow from Part 0, question 1. Then add:
 **"How is the application accessible from outside the cluster?"**
 
 > The gateway's Service is type NodePort on port 30080. On Docker Desktop the
-> node is my laptop, so it's at localhost:30080. The other three services are
+> node is my laptop, so it's at localhost:30080. The other nine services are
 > ClusterIP, they have no externally reachable address at all. In production I'd
 > use an Ingress with TLS instead, and I've included that definition, commented
 > out, in `06-gateway.yaml`.
 
 **"How is horizontal scaling achieved, and how do you know it's independent?"**
 
-> Every service has its own HorizontalPodAutoscaler object, with its own metric,
-> its own target and its own min and max. Nothing is shared between them. The
-> optimizer can go to fifteen pods while the price service stays at two.
+> Every service has its own HorizontalPodAutoscaler object, ten in total, each
+> with its own metric, its own target and its own min and max. Nothing is
+> shared between them. The optimizer can go to fifteen pods while the price
+> service stays at two.
 >
 > The price service is deliberately capped at four, by the way, because each
 > replica keeps its own cache. More pods would mean more calls to somebody else's
 > free public API. That's a design decision, not a limitation.
 >
-> I demonstrate it by scaling only the optimizer and showing the other five
+> I demonstrate it by scaling only the optimizer and showing the other nine
 > deployments unchanged.
 
 **"Walk me through your optimisation algorithm."** *(The strongest question you
@@ -466,7 +476,7 @@ Give five, in order of importance:
 
 **"What would you do differently?"**: Have a real answer ready. Mine: start as a
 modular monolith and split out the optimizer first, when scaling pressure actually
-appears; add OpenTelemetry tracing from day one, because debugging six services
+appears; add OpenTelemetry tracing from day one, because debugging ten services
 without it is genuinely painful; and put a message queue between the meters and
 ingest.
 

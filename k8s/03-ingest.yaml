@@ -76,8 +76,9 @@ spec:
 
       containers:
         - name: ingest
-          # >>> REPLACE "DOCKERHUB_USER" WITH YOUR OWN DOCKER HUB USERNAME <<<
-          # The script scripts/set-dockerhub-user.ps1 does this for you.
+          # Published under this project's Docker Hub account. Running
+          # scripts/1-build-and-push.ps1 rebuilds under YOUR OWN Docker Hub
+          # username and rewrites every image line in k8s/*.yaml to match.
           image: abhinavannareddy/medimatrx-ingest:1.4.0
           imagePullPolicy: IfNotPresent
 

@@ -2,8 +2,9 @@
 #  AUTH SERVICE - the only service that owns the users and
 #  verification_codes collections in MongoDB.
 #
-#  Like ingest, this is a "Database per Service" owner, so it is allowed a
-#  direct line to mongodb (see 08-network-policy.yaml, rule 7b). Unlike
+#  Like ingest, this service owns its own collections in the shared MongoDB
+#  instance, so it is allowed a direct line to mongodb (see
+#  08-network-policy.yaml, rule 7). Unlike
 #  ingest it is not on the hot path for the dashboard, so 2 replicas is
 #  enough headroom rather than a high ceiling.
 # ===========================================================================

@@ -3,8 +3,8 @@
 #
 #  Why this file exists: Kubernetes is the assignment, but when something
 #  does not work you want to find out whether it is your CODE or your
-#  CLUSTER. Compose runs the same four containers plus MongoDB in about 30
-#  seconds, with no cluster involved. If it works here and not in Kubernetes,
+#  CLUSTER. Compose runs the same ten application containers plus MongoDB in
+#  about 30 seconds, with no cluster involved. If it works here and not in Kubernetes,
 #  the problem is in the YAML. If it fails here too, the problem is the code.
 #
 #  Run it:      docker compose up --build

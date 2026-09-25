@@ -49,17 +49,19 @@ of three. A large regional hospital spends roughly 8--15 MSEK a year on power,
 and although it cannot reduce what it consumes, a useful share of that
 consumption can be moved in time. This report describes MediMatrx, an
 application that plans such a move and reports what it is worth, while
-guaranteeing that patient-critical load is never touched. The system runs as six
-microservices and a document database on Kubernetes, reachable from a browser
-through a single gateway. Two aspects are treated in detail. The first is the
-decomposition, which follows how the components scale rather than how the code
-is organised, and places the business logic in exactly one service. The second
-is the placement algorithm, which went through three versions: the first raised
-the site peak by 938 kW while reporting a reduction of zero, the second fixed
-that but cut the energy saving to 1.9\%, and only the third handles both tariff
-components at once. Measured over twelve runs on live market data, the deployed
-system reduces the daily energy bill by 11.4\% and cuts site peak demand by a
-median of 423 kW.
+guaranteeing that patient-critical load is never touched. The system runs as ten
+microservices across two tiers, plus a document database, on Kubernetes,
+reachable from a browser through a single gateway; four of the ten services
+handle authentication, verification, input validation and authorization, and
+six handle the energy-optimisation domain itself. Two aspects are treated in
+detail. The first is the decomposition, which follows how the components scale
+rather than how the code is organised, and places the business logic in exactly
+one service. The second is the placement algorithm, which went through three
+versions: the first raised the site peak by 938 kW while reporting a reduction
+of zero, the second fixed that but cut the energy saving to 1.9\%, and only the
+third handles both tariff components at once. Measured over twelve runs on live
+market data, the deployed system reduces the daily energy bill by 11.4\% and
+cuts site peak demand by a median of 423 kW.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -148,7 +150,7 @@ arrives.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.92\textwidth]{architecture-diagram.pdf}
-\caption{Component and deployment architecture. C1--C7 are the logical
+\caption{Component and deployment architecture. C1--C11 are the logical
 components mapped in Table~\ref{tab:mapping}. Solid arrows show the request
 path, dashed arrows internal REST calls between services. Only C1 is reachable
 from outside the cluster, and only C3 and C6 may reach the public internet.}
@@ -159,10 +161,13 @@ from outside the cluster, and only C3 and C6 may reach the public internet.}
 \label{sec:tiers}
 
 Fig.~\ref{fig:arch} shows the system split into two tiers. Tier 1 services each
-own something: the meter data, the price cache, or the optimisation algorithm.
-Tier 2 services own nothing. The assistant and the forecast service answer
-questions and build plans by calling Tier 1, so there is one copy of the
-algorithm and one copy of the data in the whole system.
+own something: the meter data, the identity data, the price cache, or the
+optimisation algorithm. Tier 2 services own nothing. The assistant and forecast
+services answer questions and build plans by calling Tier 1; the verification,
+validation and authorization services each answer one narrow identity question
+by consulting Tier 1's auth service or their own signing secret. Either way,
+there is one copy of the algorithm and one copy of every kind of data in the
+whole system.
 
 The forecast service is where this matters. It could easily have held its own
 copy of the optimisation routine, and an earlier sketch did. Instead it posts
@@ -187,25 +192,29 @@ Table~\ref{tab:mapping} gives the mapping the assignment asks for.
 \textbf{Runtime} & \textbf{Owns state?} \\
 \midrule
 C1 & --- & Presentation and entry point & \texttt{gateway} & Node.js 20 / Express & No \\
-C2 & 1 & Metering data management     & \texttt{ingest}    & Node.js 20 / Express & Yes, owns MongoDB \\
+C2 & 1 & Metering data management     & \texttt{ingest}    & Node.js 20 / Express & Yes, owns MongoDB \texttt{readings} \\
 C3 & 1 & Market price acquisition     & \texttt{price}     & Python 3.12 / FastAPI & In-memory cache only \\
 C4 & 1 & Optimisation and analytics   & \texttt{optimizer} & Python 3.12 / FastAPI & No, fully stateless \\
 C5 & 2 & Natural-language explanation & \texttt{assistant} & Python 3.12 / FastAPI & No, fully stateless \\
 C6 & 2 & Next-day prediction          & \texttt{forecast}  & Python 3.12 / FastAPI & No, fully stateless \\
-C7 & --- & Persistence                & \texttt{mongodb}   & MongoDB 7.0 & Yes \\
+C7 & 1 & Identity and credentials     & \texttt{auth}      & Python 3.12 / FastAPI & Yes, owns MongoDB \texttt{users}, \texttt{verification\_codes} \\
+C8 & 2 & One-time verification codes  & \texttt{verification} & Python 3.12 / FastAPI & No, delegates to C7 \\
+C9 & 2 & Input validation             & \texttt{validation}   & Python 3.12 / FastAPI & No, fully stateless \\
+C10 & 2 & Authorization               & \texttt{authorization} & Python 3.12 / FastAPI & No, fully stateless \\
+C11 & --- & Persistence                & \texttt{mongodb}   & MongoDB 7.0 & Yes \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \textbf{C1, API Gateway.} The only public entry point. It serves the dashboard
 and routes API calls, and it is where the cross-cutting work happens once
-instead of six times: security headers, rate limiting, request logging, upstream
-timeouts. Without it the browser would need six addresses and all six services
-would need exposing.
+instead of nine times: security headers, rate limiting, request logging, upstream
+timeouts. Without it the browser would need nine addresses and all nine backend
+services would need exposing.
 
-\textbf{C2, Ingest.} Owns the database. Nothing else has credentials for it, and
-a NetworkPolicy blocks the connection independently of whether anything else
-does.
+\textbf{C2, Ingest.} Owns the \texttt{readings} collection. Nothing else has
+credentials for it, and a NetworkPolicy blocks the connection independently of
+whether anything else does.
 
 \textbf{C3, Price.} A client of somebody else's REST API and a server of its
 own. It normalises whatever comes back into 24 hourly values and caches for
@@ -234,9 +243,30 @@ because tomorrow's day-ahead prices do not exist until the market publishes them
 in the early afternoon. Before that the service says so instead of presenting a
 model output with the same confidence as a measurement.
 
-\textbf{C7, MongoDB.} Meter readings are schemaless time-series documents,
-written far more than updated and read back through aggregations. A document
-store suits that without a migration every time a new meter type appears.
+\textbf{C7, Auth.} Registers accounts, checks credentials, issues signed JWTs,
+and is the sole owner of the \texttt{users} and \texttt{verification\_codes}
+collections. On registration it asks C8 to mint a one-time code and C8 calls
+back to a token-gated internal endpoint on C7 to store it, so C7 stays the only
+writer of its own collections.
+
+\textbf{C8, Verification.} Issues and checks one-time account codes without
+keeping a copy of the account itself; every replica agrees with the one real
+record in C7's database because it holds no data of its own.
+
+\textbf{C9, Validation.} Checks a meter reading or a registration is
+well-formed before it reaches C2 or C7. Called by the gateway before it
+forwards a write; rejects with a 400 and a list of errors on failure.
+
+\textbf{C10, Authorization.} Decodes the JWT C7 issued and checks the caller's
+role against the action attempted. Called by the gateway before every
+protected proxy call; a \texttt{staff} account may read and write, a
+\texttt{viewer} account may only read.
+
+\textbf{C11, MongoDB.} One shared instance, service-owned collections rather
+than one database per service. Meter readings and identity records are both
+schemaless documents, written far more than updated and read back through
+aggregations or single-key lookups, so a document store suits both without a
+migration every time a new meter type or account field appears.
 
 \subsection{Patterns}
 
@@ -252,7 +282,7 @@ fowler2014} used to connect the components.
 \textbf{Pattern} & \textbf{Why it is here} \\
 \midrule
 API Gateway & One public entry point; cross-cutting concerns applied once. \\
-Database per Service & Only \texttt{ingest} may reach MongoDB, enforced by credentials and by NetworkPolicy. \\
+Service-Owned Collections & Only \texttt{ingest} and \texttt{auth} may reach MongoDB, each restricted to its own collections, enforced by credentials and by NetworkPolicy. \\
 Backend for Frontend & The browser sees one same-origin API; internal boundaries can move. \\
 Service Discovery & Kubernetes DNS; no IP address appears in code or config. \\
 Cache-Aside & Turns hundreds of calls on a third-party API into four an hour. \\
@@ -383,12 +413,12 @@ than saying nothing, because somebody acts on it.
 
 \subsection{Kubernetes objects}
 
-40 resources across 11 manifests, validated against the upstream API schemas
-with \texttt{kubeconform --strict}: a Namespace, a ConfigMap and Secret, a
-StatefulSet with a \texttt{volumeClaimTemplate}, six Deployments with their
-Services, six HorizontalPodAutoscalers, five PodDisruptionBudgets and twelve
-NetworkPolicies. Every image is published to Docker Hub so the scheduler can
-pull it on any node.
+61 resources across 15 manifests, validated against the upstream API schemas
+with \texttt{kubeconform --strict}: a Namespace, a ConfigMap and two Secrets, a
+StatefulSet with a \texttt{volumeClaimTemplate}, ten Deployments with their
+Services, ten HorizontalPodAutoscalers, nine PodDisruptionBudgets and 16
+NetworkPolicies (a default-deny-all plus 15 explicit allows). Every image is
+published to Docker Hub so the scheduler can pull it on any node.
 
 \subsection{Independent scaling}
 
@@ -410,6 +440,10 @@ their behaviour.
 \texttt{optimizer} & 2 & 15 & CPU 55\%; stateless computation \\
 \texttt{assistant} & 2 & 10 & CPU 60\%; grows with users, not meters \\
 \texttt{forecast}  & 2 & 4  & CPU 65\%; capped on purpose \\
+\texttt{auth}      & 2 & 8  & CPU 65\%; login/registration traffic \\
+\texttt{verification} & 2 & 8 & CPU 65\%; stateless, cheap per call \\
+\texttt{validation}   & 2 & 12 & CPU 65\%; on the critical path of every write \\
+\texttt{authorization} & 2 & 10 & CPU 60\%; called on every protected request \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -464,24 +498,25 @@ set with restores that have actually been tested.
 replicas the real limit is $n$ times the configured one. The fix is Redis, or
 limiting at the ingress.
 
-\emph{Operational weight.} Forty Kubernetes objects and six images need a build
-pipeline and somebody on call. For one hospital that is a bad trade, and it only
-becomes reasonable across many sites.
+\emph{Operational weight.} Sixty-one Kubernetes objects and ten images need a
+build pipeline and somebody on call. For one hospital that is a bad trade, and
+it only becomes reasonable across many sites.
 
 %=============================================================================
 \section{Security}
 
 \subsection{What was done}
 
-\emph{One way in.} Only the gateway has a NodePort. The other five services are
+\emph{One way in.} Only the gateway has a NodePort. The other nine services are
 ClusterIP and have no address reachable from outside.
 
 \emph{Default-deny networking.} Kubernetes lets every pod talk to every other
 pod unless told otherwise. A \texttt{default-deny-all} policy reverses that, and
-twelve policies then open only what is needed. The important one is
-\texttt{mongodb-ingress}: only pods labelled \texttt{app: ingest} may open a TCP
-connection to the database, so an attacker holding the database password from a
-compromised optimiser pod would still be refused by the network. Egress is
+15 further policies (16 NetworkPolicy objects in total) then open only what is
+needed. The important one is \texttt{mongodb-ingress}: only pods labelled
+\texttt{app: ingest} or \texttt{app: auth} may open a TCP connection to the
+database, so an attacker holding the database password from a compromised
+optimiser pod would still be refused by the network. Egress is
 handled the same way. Only \texttt{price} and \texttt{forecast} may reach the
 internet, only on 443, with RFC 1918 ranges excluded, so neither can be turned
 into a scanner for the internal network.
@@ -566,9 +601,10 @@ system and the code describing it cannot drift apart. The layout is:
 \begin{itemize}\itemsep2pt
   \item \texttt{services/} --- one directory per microservice, each with its own
         \texttt{Dockerfile}: \texttt{gateway}, \texttt{ingest}, \texttt{price},
-        \texttt{optimizer}, \texttt{assistant}, \texttt{forecast}.
-  \item \texttt{k8s/} --- eleven numbered manifests applied in order: namespace,
-        configuration and secrets, the MongoDB StatefulSet, the six Deployments
+        \texttt{optimizer}, \texttt{assistant}, \texttt{forecast}, \texttt{auth},
+        \texttt{verification}, \texttt{validation}, \texttt{authorization}.
+  \item \texttt{k8s/} --- 15 numbered manifests applied in order: namespace,
+        configuration and secrets, the MongoDB StatefulSet, the ten Deployments
         and Services, autoscaling, network policy.
   \item \texttt{scripts/} --- numbered PowerShell scripts that build and push
         the images, deploy the cluster, and run the scaling and persistence

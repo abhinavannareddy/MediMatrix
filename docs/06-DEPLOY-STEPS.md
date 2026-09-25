@@ -44,7 +44,7 @@ and type it again.
 
 ---
 
-## Step 3: Build the six programs (5 to 10 minutes)
+## Step 3: Build the ten programs (5 to 10 minutes)
 
 Type this and press Enter:
 
@@ -66,7 +66,7 @@ minute with nothing happening. That is also normal. **Do not touch anything.**
 **You are done when you see:**
 
 ```
-DONE. All 6 images are on Docker Hub.
+DONE. All 10 images are on Docker Hub.
 ```
 
 (That number is printed from the list the script actually built, so it will
@@ -93,7 +93,7 @@ Waiting for MongoDB to be ready (this is the slow one) ...
 **This line can sit there for three minutes doing nothing.** That is normal.
 MongoDB is the database and it is slow to wake up. Do not press anything.
 
-Then it checks each of the six services in turn.
+Then it checks each of the ten services in turn.
 
 **You are done when you see:**
 
@@ -133,7 +133,8 @@ Go back to the black window and type:
 kubectl get pods -n medimatrx
 ```
 
-You should count **11 lines** of pods, all saying `Running`.
+You should count **21 lines** of pods, all saying `Running` (ten services at
+2 replicas each, plus one MongoDB pod).
 
 ---
 
@@ -153,7 +154,7 @@ Leave that window open, and use **http://localhost:8080** instead.
 
 Kubernetes cannot download your programs.
 
-Go to hub.docker.com, sign in, and check all six repositories are there and
+Go to hub.docker.com, sign in, and check all ten repositories are there and
 say **Public**. If one says Private, click it, then Settings, then make it
 Public.
 

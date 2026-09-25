@@ -189,8 +189,9 @@ spec:
 
 ---
 # ---- 7. ONLY the two collection owners may reach the database -----------
-# This is the most important rule in the file. It is the technical
-# enforcement of the "Database per Service" pattern: even if another
+# This is the most important rule in the file. MongoDB is one shared
+# instance, not one database per service, so the network is what makes
+# "service-owned collections" more than a convention: even if another
 # service knew the MongoDB password, the network would refuse the
 # connection. ingest owns "readings"; auth owns "users" and
 # "verification_codes" - two owners sharing one server, each still

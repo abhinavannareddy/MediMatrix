@@ -91,92 +91,94 @@ fifteen minutes as new price data arrives.*
 
 ### 2.1 The picture
 
-The system is built in two tiers. Tier 1 services each own something: the meter
-data, the price cache, or the optimisation algorithm. Tier 2 services own
-nothing. They answer questions and build plans by calling Tier 1, so there is one
-copy of the algorithm and one copy of the data in the whole system.
+The system is built in two tiers, sitting behind one gateway and above one
+shared database. Tier 1 services each own something: the meter data, the
+identity data, the price cache, or the optimisation algorithm. Tier 2 services
+own nothing. They answer questions and build plans by calling Tier 1, so there
+is one copy of the algorithm and one copy of every kind of data in the whole
+system.
 
 ```
-                  ┌──────────────────────────────┐
-                  │   Hospital estates manager   │
-                  │        (a web browser)       │
-                  └───────────────┬──────────────┘
-                                  │ HTTP :30080
-   ═══════════════════════════════╪═══════════════════════════════
-     KUBERNETES CLUSTER           │  NodePort - the only way in
-   ═══════════════════════════════╪═══════════════════════════════
-                                  ▼
-                  ┌──────────────────────────────┐
-                  │        API GATEWAY           │  Node.js / Express
-                  │  serves the dashboard and    │  2-10 replicas
-                  │  routes every API call       │
-                  └───────────────┬──────────────┘
-                                  │
-   ── TIER 1: services that own something ──────────────────────────
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        ▼                         ▼                         ▼
- ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
- │    INGEST    │        │    PRICE     │        │  OPTIMIZER   │
- │ Node/Express │        │ Py / FastAPI │        │ Py / FastAPI │
- │  2-12 pods   │        │   2-4 pods   │        │  2-15 pods   │
- │              │        │              │        │              │
- │ owns all     │        │ caches SE1   │        │ owns the     │
- │ meter data   │        │ to SE4       │        │ algorithm,   │
- │              │        │ prices       │        │ stateless    │
- └──────┬───────┘        └──────┬───────┘        └──────────────┘
-        │                       │                        ▲
-        │ mongodb :27017        │ HTTPS                  │
-        ▼                       ▼                        │
- ┌──────────────┐        ┌──────────────┐                │
- │   MONGODB    │        │ elprisetjust │                │
- │  StatefulSet │        │ nu.se        │                │
- │  1 replica   │        │ (day-ahead   │                │
- │  ┌────────┐  │        │  prices)     │                │
- │  │  PVC   │  │        └──────────────┘                │
- │  │ 2 GiB  │  │                                        │
- │  └────────┘  │                                        │
- └──────────────┘                                        │
-                                                         │
-   ── TIER 2: services that only read ────────────────────┼───────
-                                                         │
-        ┌────────────────────────────────────────────────┤
-        │                                                │
- ┌──────┴───────┐                                 ┌──────┴───────┐
- │  ASSISTANT   │                                 │   FORECAST   │
- │ Py / FastAPI │                                 │ Py / FastAPI │
- │   2-6 pods   │                                 │   2-4 pods   │
- │              │                                 │              │
- │ answers      │                                 │ predicts     │
- │ questions in │                                 │ tomorrow,    │
- │ plain words  │                                 │ then asks    │
- │              │                                 │ the optimizer│
- └──────────────┘                                 └──────┬───────┘
-                                                         │ HTTPS
-                                                         ▼
-                                                  ┌──────────────┐
-                                                  │  Open-Meteo  │
-                                                  │  (weather    │
-                                                  │   forecast)  │
-                                                  └──────────────┘
+                       ┌──────────────────────────────┐
+                       │   Hospital estates manager   │
+                       │        (a web browser)       │
+                       └───────────────┬──────────────┘
+                                       │ HTTP :30080
+   ════════════════════════════════════╪════════════════════════════════════
+     KUBERNETES CLUSTER                │  NodePort - the only way in
+   ════════════════════════════════════╪════════════════════════════════════
+                                       ▼
+                       ┌──────────────────────────────┐
+                       │          C1 GATEWAY          │  Node.js / Express
+                       │  serves the dashboard and    │  2-10 replicas
+                       │  routes every API call       │
+                       └───────────────┬──────────────┘
+                                       │
+        ┌──────────────────────────────┴──────────────────────────────┐
+        │                                                              │
+  ── TIER 1: services that own something ──         ── TIER 2: services that only read ──
+        │                                                              │
+   ┌────┴────┬────────────┬────────────┐                 ┌────────────┼────────────┬────────────┬────────────┐
+   ▼         ▼            ▼            ▼                 ▼            ▼            ▼            ▼            ▼
+┌──────┐  ┌──────┐   ┌──────────┐  ┌──────────┐     ┌──────────┐  ┌──────────┐ ┌────────────┐┌────────────┐┌────────────────┐
+│  C2  │  │  C7  │   │    C3    │  │    C4    │     │    C5    │  │    C6    │ │     C8     ││     C9     ││       C10       │
+│INGEST│  │ AUTH │   │  PRICE   │  │OPTIMIZER │     │ASSISTANT │  │ FORECAST │ │VERIFICATION││ VALIDATION ││ AUTHORIZATION   │
+│Node  │  │Python│   │  Python  │  │  Python  │     │  Python  │  │  Python  │ │   Python   ││   Python   ││     Python      │
+│2-12  │  │2-8   │   │2-4 pods  │  │2-15 pods │     │2-10 pods │  │2-4 pods  │ │  2-8 pods  ││ 2-12 pods  ││   2-10 pods     │
+│owns  │  │owns  │   │caches    │  │owns the  │     │read-only,│  │predicts  │ │stateless,  ││checked     ││checks every     │
+│meter │  │users +│  │SE1-SE4   │  │algorithm,│     │reads C2, │  │tomorrow, │ │asks C7 to  ││before a    ││protected call;  │
+│data  │  │codes  │  │prices    │  │stateless │     │C3, C4    │  │posts to  │ │store/check ││reading or  ││holds only the   │
+│      │  │       │  │          │  │          │     │          │  │C4        │ │codes       ││registration││signing secret   │
+└──┬───┘  └──┬───┘   └────┬─────┘  └──────────┘     └──────────┘  └────┬─────┘ └────────────┘└────────────┘└─────────────────┘
+   │         │            │ HTTPS                                      │ HTTPS
+   │mongodb  │mongodb     ▼                                            ▼
+   │:27017   │:27017 ┌──────────────┐                          ┌──────────────┐
+   └────┬────┘       │elprisetjustnu│                          │  Open-Meteo  │
+        ▼            │.se (day-ahead│                          │  (weather    │
+ ┌──────────────┐     │  prices)     │                          │   forecast)  │
+ │  C11 MONGODB │     └──────────────┘                          └──────────────┘
+ │  StatefulSet │
+ │  1 replica   │
+ │ ┌──────────┐ │
+ │ │   PVC    │ │
+ │ │  2 GiB   │ │
+ │ └──────────┘ │
+ └──────────────┘
 ```
+
+MongoDB is one shared instance, not one database per service: C2 owns the
+`readings` collection, C7 owns `users` and `verification_codes`, and no other
+service has a connection string for it at all, enforced by NetworkPolicy as
+well as by which services carry MongoDB client code. The pattern is
+**service-owned collections**, not database-per-service.
+
 ### 2.2 Mapping software components to microservices
 
 The assignment asks for an explicit mapping between the logical components and
 the microservices implementing them. Here it is.
 
-| # | Logical component | Implemented by | Language / framework | Owns state? | Docker Hub image |
-|---|---|---|---|---|---|
-| C1 | Presentation & entry point | **API Gateway** (`gateway`) | Node.js 20 / Express | No | `medimatrx-gateway:1.4.0` |
-| C2 | Metering data management | **Ingest Service** (`ingest`) | Node.js 20 / Express | **Yes, owns MongoDB** | `medimatrx-ingest:1.4.0` |
-| C3 | Market price acquisition | **Price Service** (`price`) | Python 3.12 / FastAPI | In-memory cache only | `medimatrx-price:1.4.0` |
-| C4 | Optimisation & analytics | **Optimizer Service** (`optimizer`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-optimizer:1.4.0` |
-| C5 | Natural-language explanation | **Assistant Service** (`assistant`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-assistant:1.4.0` |
-| C6 | Next-day prediction & planning | **Forecast Service** (`forecast`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-forecast:1.4.0` |
-| C7 | Persistence | **MongoDB** | MongoDB 7.0 | Yes | `mongo:7.0` (official) |
-Six application microservices plus a database. C1 to C4 are Tier 1 in the diagram
-above, C5 and C6 are Tier 2. What the two Tier 2 services share is that neither
-holds any business logic; both call C4 for every number they report.
+| # | Tier | Logical component | Implemented by | Language / framework | Owns state? | Docker Hub image |
+|---|---|---|---|---|---|---|
+| C1 | --- | Presentation & entry point | **API Gateway** (`gateway`) | Node.js 20 / Express | No | `medimatrx-gateway:1.4.0` |
+| C2 | 1 | Metering data management | **Ingest Service** (`ingest`) | Node.js 20 / Express | **Yes, owns MongoDB `readings`** | `medimatrx-ingest:1.4.0` |
+| C3 | 1 | Market price acquisition | **Price Service** (`price`) | Python 3.12 / FastAPI | In-memory cache only | `medimatrx-price:1.4.0` |
+| C4 | 1 | Optimisation & analytics | **Optimizer Service** (`optimizer`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-optimizer:1.4.0` |
+| C5 | 2 | Natural-language explanation | **Assistant Service** (`assistant`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-assistant:1.4.0` |
+| C6 | 2 | Next-day prediction & planning | **Forecast Service** (`forecast`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-forecast:1.4.0` |
+| C7 | 1 | Identity & credentials | **Auth Service** (`auth`) | Python 3.12 / FastAPI | **Yes, owns MongoDB `users`, `verification_codes`** | `medimatrx-auth:1.4.0` |
+| C8 | 2 | One-time verification codes | **Verification Service** (`verification`) | Python 3.12 / FastAPI | No, delegates storage to C7 | `medimatrx-verification:1.4.0` |
+| C9 | 2 | Input validation | **Validation Service** (`validation`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-validation:1.4.0` |
+| C10 | 2 | Authorization | **Authorization Service** (`authorization`) | Python 3.12 / FastAPI | No, fully stateless | `medimatrx-authorization:1.4.0` |
+| C11 | --- | Persistence | **MongoDB** | MongoDB 7.0 | Yes | `mongo:7.0` (official) |
+
+Ten application microservices plus a database. C2, C7, C3 and C4 are Tier 1 in
+the diagram above; C5, C6, C8, C9 and C10 are Tier 2. What the five Tier 2
+services share is that none of them holds business state of its own: the
+assistant and forecast services call C4 for every number they report, and
+verification, validation and authorization each answer a single narrow
+question (is this code valid, is this input well-formed, is this token and
+role allowed) by consulting C7 or their own signing secret, never a database
+they own.
 
 #### C1: API Gateway
 
@@ -184,9 +186,9 @@ holds any business logic; both call C4 for every number they report.
 API call to whichever internal service owns that job. Apply the cross-cutting
 work once: security headers, rate limiting, request logging, upstream timeouts.
 
-*Why it exists:* without it the browser would need six addresses and all six
-services would need exposing. With it, one pod has a public door and the other
-five are unreachable from outside the cluster.
+*Why it exists:* without it the browser would need nine addresses and all nine
+backend services would need exposing. With it, one pod has a public door and
+the other nine are unreachable from outside the cluster.
 
 #### C2: Ingest Service
 
@@ -341,35 +343,100 @@ field and a list of `caveats`, because tomorrow's day-ahead prices do not exist
 until the market publishes them in the early afternoon. Before then it says so
 rather than presenting a model output with the same confidence as a measurement.
 
-#### C7: MongoDB
+#### C7: Auth Service
 
-*Responsibility:* durable storage of meter readings.
+*Responsibility:* register staff accounts, check credentials, issue signed
+JWTs. It is the sole owner of the `users` and `verification_codes` collections
+in MongoDB; no other service holds a connection string for either.
+
+*Why it exists separately:* who a caller is and what they may do are different
+questions, so authentication (C7) and authorization (C10) are split across two
+services on purpose. A permissions change never touches the code that checks a
+password, and vice versa. On registration, C7 asks C8 to mint a one-time
+verification code; C8 then calls back to `/internal/codes` on C7 to store it,
+gated by a shared internal token in addition to the NetworkPolicy, so a network
+misconfiguration alone is not enough to forge a verified account. A `staff`
+account may read and write; a `viewer` account may only read, a distinction
+enforced by C10, not by hiding a button in the browser. Role is chosen by the
+caller at registration, which is a deliberate demo simplification discussed in
+Section 6.
+
+#### C8: Verification Service
+
+*Responsibility:* decide the policy for one-time account codes (how long they
+last, how they are shaped) without keeping a copy of the account itself. It
+generates a code on request and asks C7 to store it; when a code comes back
+for checking, it asks C7 to check it.
+
+*Why it exists separately:* it holds no data of its own, so any replica agrees
+with the one real record in C7's database, and it can run at any replica count
+with no shared cache. Splitting "what the code policy is" from "who owns the
+account" means the verification rules (expiry, format) can change without
+touching the identity store.
+
+#### C9: Validation Service
+
+*Responsibility:* check that a meter reading or a new-account registration is
+well-formed before it reaches the service that would have to trust it. It
+caches the current zone list from C2 for five minutes so a `POST /api/readings`
+with an unknown `zoneId` is rejected before it is ever written.
+
+*Why it exists separately:* the gateway calls it before forwarding a write, and
+rejects the request with a 400 and a list of `errors` if it fails. Ingest and
+auth still run their own basic checks too; this is a boundary check on top of
+those, not instead of them, and keeping it as one service means the same
+validation rules apply everywhere a write can enter the system.
+
+#### C10: Authorization Service
+
+*Responsibility:* decode the JWT that C7 issued and check the caller's role
+against the action being attempted. It holds no data of its own beyond the
+signing secret it shares with C7.
+
+*Why it exists separately:* every `/api` route except registration,
+verification and login requires a bearer token, and the gateway asks C10
+before proxying anywhere rather than deciding for itself. That keeps the
+gateway's own job simple (front door, not judge) and means a single service
+can be pointed at when asking "why was this request rejected?". The role
+model is deliberately coarse: `staff` may perform `read` and `write` actions,
+`viewer` may only `read`.
+
+#### C11: MongoDB
+
+*Responsibility:* durable storage, shared by the two services that own
+collections in it: meter readings (C2) and identity data (C7).
 
 *Why MongoDB:* meter readings are schemaless time-series documents, arriving in
-volume, written far more often than updated, and read back through aggregations.
-A document store fits that without a migration every time a new meter type
-appears. It runs as a StatefulSet with a PersistentVolumeClaim, so the data
-outlives the pod.
+volume, written far more often than updated, and read back through aggregations;
+user accounts and verification codes are small, simple documents with no need
+for a relational schema. A document store fits both without a migration every
+time a new meter type or account field appears. It runs as a single StatefulSet
+with one PersistentVolumeClaim, so the data outlives the pod. This is a shared
+instance with service-owned collections, not one database per service: the
+NetworkPolicy in `08-network-policy.yaml` (rule `mongodb-ingress`) permits a
+TCP connection from pods labelled `app: ingest` or `app: auth` only, so the
+separation is enforced by the network, not merely by convention.
 
 ### 2.3 Architecture patterns used
 
 | Pattern | Where | Why it is there |
 |---|---|---|
 | **API Gateway** | `gateway` | One public entry point; cross-cutting concerns applied once; internal services stay private. |
-| **Database per Service** | `ingest` owns MongoDB exclusively | Nobody else may touch the database, not even by knowing the password, because a NetworkPolicy blocks the connection. Services stay independently deployable. |
+| **Service-owned collections** | `ingest` owns `readings`, `auth` owns `users`/`verification_codes` | One shared MongoDB instance, not one database per service, but nobody may touch another service's collections, not even by knowing the password, because a NetworkPolicy blocks the connection. Services stay independently deployable. |
 | **Backend for Frontend (BFF)** | `gateway` reshapes and proxies | The browser gets one same-origin API; internal service boundaries can change without breaking the UI. |
 | **Service Discovery** | Kubernetes DNS (`http://ingest-service:8080`) | No IP address appears anywhere in the code or config. Pods can move, restart and multiply freely. |
 | **Client-side load balancing via Service** | every ClusterIP Service | Scaling a deployment automatically spreads traffic. Callers need no knowledge of replica count. |
 | **Cache-Aside** | `price` caches for 15 min | Turns hundreds of calls to a third-party API into four per hour. Cheaper, faster, and a good citizen. |
 | **Graceful degradation / fallback** | `price` serves stale cache, then a modelled curve | An upstream outage degrades one number's accuracy instead of blanking the dashboard. |
 | **Retry with backoff** | `ingest` → MongoDB | Start-up order is not guaranteed in Kubernetes. The service waits patiently instead of crash-looping. |
-| **Health / readiness separation** | all six services | Liveness failure = restart me. Readiness failure = stop sending me traffic but let me recover. Confusing the two causes restart storms. |
+| **Health / readiness separation** | all ten services | Liveness failure = restart me. Readiness failure = stop sending me traffic but let me recover. Confusing the two causes restart storms. |
 | **Grounded assistant / tool use** | `assistant` calls C2, C3, C4 for every figure | The component that speaks in sentences is forbidden from doing arithmetic. Fluent prose is persuasive whether or not it is correct, so the only safe design is one where it has nothing to be wrong about. |
 | **Single source of truth for logic** | `forecast` posts scenarios to C4 rather than re-implementing it | Today's report and tomorrow's plan come out of one algorithm. Duplicating it would guarantee they eventually disagree, and the disagreement would surface in front of a customer. |
 | **Bulkhead & fail-fast** | gateway's 8 s upstream timeout | A slow service returns a clear 502 instead of hanging every browser connected to the dashboard. |
-| **Stateless compute** | `optimizer`, `price` | The precondition for horizontal scaling. No session state, no sticky routing, no coordination. |
-| **Externalised configuration** | ConfigMap + Secret | One image runs in every environment (Twelve-Factor). Credentials are never in source control. |
+| **Stateless compute** | `optimizer`, `price`, `verification`, `validation`, `authorization` | The precondition for horizontal scaling. No session state, no sticky routing, no coordination. |
+| **Externalised configuration** | ConfigMap + two Secrets | One image runs in every environment (Twelve-Factor). Credentials are never in source control. |
 | **Sidecar-free, single-concern containers** | all | One process per container, PID 1 handles SIGTERM, graceful shutdown on scale-down. |
+| **Authentication / Authorization separation** | `auth` issues tokens, `authorization` checks them | A permissions change never requires touching the code that checks a password, and vice versa. |
 ### 2.4 How a single request flows
 
 When the estates manager opens the dashboard:
@@ -400,24 +467,29 @@ When the estates manager opens the dashboard:
 
 | File | Objects | Purpose |
 |---|---|---|
-| `00-namespace.yaml` | Namespace | An isolation boundary; `kubectl delete namespace medimatrx` removes everything. |
-| `01-config-and-secrets.yaml` | ConfigMap, Secret | All configuration and credentials, outside the images. |
-| `02-mongodb.yaml` | headless Service, StatefulSet + volumeClaimTemplate | Stable identity + persistent 2 GiB disk. |
-| `03-ingest.yaml` | ClusterIP Service, Deployment | 2 replicas, internal only. |
-| `04-price.yaml` | ClusterIP Service, Deployment | 2 replicas, internal only. |
-| `05-optimizer.yaml` | ClusterIP Service, Deployment | 2 replicas, internal only. |
-| `06-gateway.yaml` | **NodePort** Service, Deployment | The public entry point on port 30080. Ingress alternative included, commented. |
-| `07-autoscaling.yaml` | 6 × HorizontalPodAutoscaler, 5 × PodDisruptionBudget | Independent autoscaling; protection against administrative eviction. |
-| `08-network-policy.yaml` | 12 × NetworkPolicy | Default-deny east-west firewall inside the cluster. |
-| `09-assistant.yaml` | ClusterIP Service, Deployment | 2 replicas, internal only. |
-| `10-forecast.yaml` | ClusterIP Service, Deployment | 2 replicas, internal only. |
-40 Kubernetes resources in total, all validated against the upstream JSON schemas
-with `kubeconform --strict`.
+| `00-namespace.yaml` | 1 Namespace | An isolation boundary; `kubectl delete namespace medimatrx` removes everything. |
+| `01-config-and-secrets.yaml` | 1 ConfigMap, 2 Secret | All configuration and credentials, outside the images. |
+| `02-mongodb.yaml` | 1 headless Service, 1 StatefulSet + volumeClaimTemplate | Stable identity + persistent 2 GiB disk. |
+| `03-ingest.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `04-price.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `05-optimizer.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `06-gateway.yaml` | 1 **NodePort** Service, 1 Deployment | The public entry point on port 30080. Ingress alternative included, commented. |
+| `07-autoscaling.yaml` | 10 × HorizontalPodAutoscaler, 9 × PodDisruptionBudget | Independent autoscaling; protection against administrative eviction. |
+| `08-network-policy.yaml` | 16 × NetworkPolicy | Default-deny east-west firewall inside the cluster. |
+| `09-assistant.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `10-forecast.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `11-auth.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `12-verification.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `13-validation.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+| `14-authorization.yaml` | 1 ClusterIP Service, 1 Deployment | 2 replicas, internal only. |
+
+61 Kubernetes resources across these 15 manifest files.
 
 ### 3.2 How the horizontal scaling requirement is satisfied
 
-Every microservice has its own HorizontalPodAutoscaler, with its own metric,
-target and ceiling. Nothing is shared, so nothing couples their behaviour:
+Every microservice has its own HorizontalPodAutoscaler, ten in total, with its
+own metric, target and ceiling. Nothing is shared, so nothing couples their
+behaviour:
 
 | Service | min | max | Scales on | Why this ceiling |
 |---|---|---|---|---|
@@ -427,6 +499,11 @@ target and ceiling. Nothing is shared, so nothing couples their behaviour:
 | `optimizer` | 2 | **15** | CPU 55% | Pure stateless computation; the highest ceiling in the system. |
 | `assistant` | 2 | 10 | CPU 60% | Scales with the number of people asking questions, which is a function of users rather than of meters. |
 | `forecast` | 2 | **4** | CPU 65% | Capped low for the same reason as `price`: each replica calls a third-party weather API, and a plan is produced once a day, not once a click. |
+| `auth` | 2 | 8 | CPU 65% | Login and registration traffic, not on the hot path of the dashboard. |
+| `verification` | 2 | 8 | CPU 65% | Stateless and cheap per call; scales with account sign-ups. |
+| `validation` | 2 | **12** | CPU 65% | On the critical path of every write (a reading or a registration), so it is allowed to grow the most of the four identity services. |
+| `authorization` | 2 | 10 | CPU 60% | Called on every protected request the gateway forwards, so it gets the same generous ceiling as the gateway itself. |
+
 The low ceilings on `price` and `forecast` are a decision rather than an
 oversight. Scaling out a service that caches somebody else's public API does not
 make the system faster; it multiplies the load on that third party and lowers the
@@ -438,7 +515,7 @@ immediately when load arrives, shrink over a 180-300 second window so a short
 lull does not make pods thrash.
 
 **Demonstration:** `scripts/3-demo-scaling.ps1` scales the optimizer from 2 to 6
-replicas, shows the other five deployments unchanged, then issues 20 requests and
+replicas, shows the other nine deployments unchanged, then issues 20 requests and
 prints which optimizer pod answered each.
 
 ### 3.3 How the persistent storage requirement is satisfied
@@ -533,9 +610,10 @@ assumption, not a measurement.
 
 ### 5.1 Distributed systems are harder than a monolith
 
-**The challenge.** One call to `/api/optimize` becomes three network hops. Every
-hop can be slow, can fail, or can succeed slowly, which is worse. No stack trace
-spans all six services.
+**The challenge.** One call to `/api/optimize` becomes three network hops, and a
+single registration touches four more services (validation, auth, verification,
+authorization). Every hop can be slow, can fail, or can succeed slowly, which is
+worse. No stack trace spans all ten services.
 
 **What was done.** Every service emits single-line structured JSON logs tagged
 with service and pod name, so `kubectl logs` output can be filtered and
@@ -592,7 +670,7 @@ includes an `nginx.ingress.kubernetes.io/limit-rps` annotation showing this.
 
 ### 5.5 Operational complexity
 
-**The challenge.** A monolith is one process. This is 40 Kubernetes objects, six
+**The challenge.** A monolith is one process. This is 61 Kubernetes objects, ten
 container images, and a build pipeline. For a two-person startup that is real
 overhead, and for a single hospital it is a bad trade.
 
@@ -613,10 +691,10 @@ Taken in the order an attacker would meet it.
 
 ### 6.1 What was done
 
-**One door, not six.** Only the gateway has a NodePort. Ingest, price, optimizer,
-assistant and forecast are all ClusterIP with no address reachable from outside
-the cluster. Five of the six services cannot be attacked from the internet at
-all.
+**One door, not ten.** Only the gateway has a NodePort. Every other service
+(ingest, price, optimizer, assistant, forecast, auth, verification, validation,
+authorization) is ClusterIP with no address reachable from outside the cluster.
+Nine of the ten services cannot be attacked from the internet at all.
 
 **Authentication and authorization, in separate services.** Every `/api` route
 but registration, verification and login requires a bearer token; the gateway
@@ -631,13 +709,13 @@ account may read and write; a `viewer` account is read-only, enforced by
 
 **Default-deny network policy.** Kubernetes lets every pod talk to every other
 pod unless told otherwise. `08-network-policy.yaml` reverses that: a
-`default-deny-all` policy blocks everything, then twelve policies open only the
-conversations the system needs. The important one is `mongodb-ingress`, where
-only pods labelled `app: ingest` may open a TCP connection to MongoDB. An
-attacker holding the database password from a compromised optimizer pod would
-still find the network refusing the connection. That is lateral-movement
-containment, and it is the difference between one compromised pod and a
-compromised cluster.
+`default-deny-all` policy blocks everything, then 15 further policies (16
+NetworkPolicy objects in total) open only the conversations the system needs.
+The important one is `mongodb-ingress`, where only pods labelled `app: ingest`
+or `app: auth` may open a TCP connection to MongoDB. An attacker holding the
+database password from a compromised optimizer pod would still find the
+network refusing the connection. That is lateral-movement containment, and it
+is the difference between one compromised pod and a compromised cluster.
 
 Egress works the same way. Only `price` and `forecast` may reach the public
 internet, only on port 443, and both policies exclude the private RFC 1918
@@ -710,17 +788,21 @@ is defence in depth. Those two are the front door standing open.
 
 ## 7. Conclusion
 
-MediMatrx meets the assignment's technical requirements: six independently
+MediMatrx meets the assignment's technical requirements: ten independently
 scalable microservices in two languages, each with its own REST API, a MongoDB
 database on persistent storage, browser access from outside the cluster, images
-published to Docker Hub, and a complete Kubernetes deployment. It does so while
-solving a problem a Swedish hospital actually has.
+published to Docker Hub, and a complete Kubernetes deployment covering
+authentication, authorization, verification and validation as well as the
+energy-optimisation domain. It does so while solving a problem a Swedish
+hospital actually has.
 
 The justification for the architecture is not that microservices are
-fashionable. It is that the three workloads here (high-volume writes,
+fashionable. It is that the three energy workloads here (high-volume writes,
 third-party data acquisition, and CPU-bound optimisation) grow at different rates
 as the customer base grows, and only a distributed architecture lets each be paid
-for separately.
+for separately; the four identity services split along a different axis, cleanly
+separating who a caller is, whether their code was confirmed, whether their
+input is well-formed, and what their role permits.
 
 The part I would carry into other work is narrower and concerns the optimisation
 itself. Two implementations in a row were arithmetically correct and economically
@@ -777,6 +859,31 @@ All endpoints are reachable through the gateway at `http://localhost:30080`.
 |---|---|---|
 | `GET` | `/api/forecast/weather` | Today's and tomorrow's hourly temperature for the site. |
 | `GET` | `/api/forecast/plan?area=SE4` | Tomorrow's predicted load and the optimisation plan for it, with a confidence rating and explicit caveats. |
+
+### Auth, Verification and Authorization Services
+
+These three routes are the only ones under `/api` that do **not** require a
+bearer token; every other route requires `Authorization: Bearer <token>`,
+checked against the authorization service before the gateway proxies
+anywhere.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register an account. Body: `{"username","email","password","role":"staff"\|"viewer"}`. The gateway validates the body against the validation service first. |
+| `POST` | `/api/auth/verify` | Confirm the one-time code sent back at registration. Body: `{"user_id","code"}`, proxied to the verification service. |
+| `POST` | `/api/auth/login` | Body: `{"username","password"}`. Returns `{"token","username","role"}` on success. |
+
+The verification and authorization services expose no other public routes:
+verification's `/api/generate` is called by the auth service on registration,
+and authorization's `/api/authorize` is called by the gateway on every
+protected request. Both are internal, ClusterIP-only calls.
+
+### Validation Service
+
+Not called directly by a browser. The gateway calls
+`POST /api/validate/reading` before forwarding a meter reading and
+`POST /api/validate/registration` before forwarding a registration, and
+rejects the request with a 400 and a list of `errors` if either check fails.
 
 ### Operational
 
