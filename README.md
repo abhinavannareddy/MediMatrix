@@ -325,7 +325,9 @@ Stated openly, with the fix, in `docs/01-REPORT.md` §5 and §6:
   set with tested backups.
 
 ---
+## Demonstration Video
 
+[▶ Watch the MediMatrx demonstration video](https://www.youtube.com/watch?v=bokgBK0_dd0)
 ## Licence
 
 MIT licence. Coursework project.
