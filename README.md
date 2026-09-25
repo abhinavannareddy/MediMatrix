@@ -37,57 +37,59 @@ On the demo dataset: **~12% off the energy bill plus a peak-demand reduction, in
 ## Architecture
 
 ```
-Browser ──► API Gateway (Node.js) ──┬──► Ingest Service (Node.js) ──► MongoDB
-             NodePort :30080        │         owns the data          StatefulSet
-             the only way in        │                                    + PVC
-                                    ├──► Price Service (Python) ──► elprisetjustnu.se
-                                    │         caches 15 min            (public API)
-                                    │
-                                    ├──► Optimizer Service (Python)
-                                    │         stateless brain
-                                    │         calls ingest + price
-                                    │
-                                    ├──► Assistant Service (Python)
-                                    │         natural language, read-only
-                                    │         calls ingest + price + optimizer
-                                    │
-                                    ├──► Forecast Service (Python) ──► Open-Meteo
-                                    │         predicts tomorrow's load    (public API)
-                                    │         from the weather, then asks
-                                    │         the optimizer to plan it
-                                    │
-                                    ├──► Auth Service (Python) ──► MongoDB
-                                    │         registration, login,        (users,
-                                    │         issues JWTs                 verification_codes)
-                                    │
-                                    ├──► Verification Service (Python)
-                                    │         one-time codes, stateless
-                                    │         (delegates storage to auth)
-                                    │
-                                    ├──► Validation Service (Python)
-                                    │         checks a reading / a
-                                    │         registration before it lands
-                                    │
-                                    └──► Authorization Service (Python)
-                                              checks a JWT + role before
-                                              the gateway proxies anywhere
+Browser ──► C1 API Gateway (Node.js) ──┬──► C2 Ingest Service (Node.js) ──► C11 MongoDB
+             NodePort :30080           │         owns the data              StatefulSet
+             the only way in           │                                        + PVC
+   ── Tier 1: owns something ──────────┤
+                                        ├──► C3 Price Service (Python) ──► elprisetjustnu.se
+                                        │         caches 15 min              (public API)
+                                        │
+                                        ├──► C4 Optimizer Service (Python)
+                                        │         stateless brain
+                                        │         calls ingest + price
+                                        │
+                                        ├──► C7 Auth Service (Python) ──► C11 MongoDB
+                                        │         registration, login,        (users,
+                                        │         issues JWTs                 verification_codes)
+                                        │
+   ── Tier 2: reads only ───────────────┤
+                                        ├──► C5 Assistant Service (Python)
+                                        │         natural language, read-only
+                                        │         calls ingest + price + optimizer
+                                        │
+                                        ├──► C6 Forecast Service (Python) ──► Open-Meteo
+                                        │         predicts tomorrow's load    (public API)
+                                        │         from the weather, then asks
+                                        │         the optimizer to plan it
+                                        │
+                                        ├──► C8 Verification Service (Python)
+                                        │         one-time codes, stateless
+                                        │         (delegates storage to auth)
+                                        │
+                                        ├──► C9 Validation Service (Python)
+                                        │         checks a reading / a
+                                        │         registration before it lands
+                                        │
+                                        └──► C10 Authorization Service (Python)
+                                                  checks a JWT + role before
+                                                  the gateway proxies anywhere
 ```
 
 ![MediMatrx architecture](docs/architecture-diagram.svg)
 
-| Service | Language | Replicas | Owns state | Role |
-|---|---|---|---|---|
-| **gateway** | Node.js / Express | 2-10 | no | Single public entry point; serves the dashboard; routing, rate limiting, security headers, auth enforcement |
-| **ingest** | Node.js / Express | 2-12 | **MongoDB** (`readings`) | Receives and stores meter readings; serves 24-hour aggregates |
-| **price** | Python / FastAPI | 2-4 | cache only | Fetches live spot prices; caches; degrades gracefully when upstream fails |
-| **optimizer** | Python / FastAPI | 2-15 | no | Computes the load-shifting plan, savings and anomalies |
-| **assistant** | Python / FastAPI | 2-10 | no | Answers questions in plain English, grounded strictly in the other services' APIs |
-| **forecast** | Python / FastAPI | 2-4 | no | Predicts tomorrow's load from the weather forecast, then asks the optimizer to plan it |
-| **auth** | Python / FastAPI | 2-8 | **MongoDB** (`users`, `verification_codes`) | Registers staff accounts, checks credentials, issues JWTs |
-| **verification** | Python / FastAPI | 2-8 | no | Issues and checks one-time account codes; stores nothing itself, asks auth to |
-| **validation** | Python / FastAPI | 2-12 | no | Checks a meter reading or a registration is well-formed before it reaches its owner |
-| **authorization** | Python / FastAPI | 2-10 | no | Decodes a JWT and checks the caller's role against the action attempted |
-| **mongodb** | MongoDB 7.0 | 1 | **yes** | Persistent storage on a PersistentVolumeClaim, shared by ingest and auth |
+| # | Tier | Service | Language | Replicas | Owns state | Role |
+|---|---|---|---|---|---|---|
+| C1 | --- | **gateway** | Node.js / Express | 2-10 | no | Single public entry point; serves the dashboard; routing, rate limiting, security headers, auth enforcement |
+| C2 | 1 | **ingest** | Node.js / Express | 2-12 | **MongoDB** (`readings`) | Receives and stores meter readings; serves 24-hour aggregates |
+| C3 | 1 | **price** | Python / FastAPI | 2-4 | cache only | Fetches live spot prices; caches; degrades gracefully when upstream fails |
+| C4 | 1 | **optimizer** | Python / FastAPI | 2-15 | no | Computes the load-shifting plan, savings and anomalies |
+| C5 | 2 | **assistant** | Python / FastAPI | 2-10 | no | Answers questions in plain English, grounded strictly in the other services' APIs |
+| C6 | 2 | **forecast** | Python / FastAPI | 2-4 | no | Predicts tomorrow's load from the weather forecast, then asks the optimizer to plan it |
+| C7 | 1 | **auth** | Python / FastAPI | 2-8 | **MongoDB** (`users`, `verification_codes`) | Registers staff accounts, checks credentials, issues JWTs |
+| C8 | 2 | **verification** | Python / FastAPI | 2-8 | no | Issues and checks one-time account codes; stores nothing itself, asks auth to |
+| C9 | 2 | **validation** | Python / FastAPI | 2-12 | no | Checks a meter reading or a registration is well-formed before it reaches its owner |
+| C10 | 2 | **authorization** | Python / FastAPI | 2-10 | no | Decodes a JWT and checks the caller's role against the action attempted |
+| C11 | --- | **mongodb** | MongoDB 7.0 | 1 | **yes** | Persistent storage on a PersistentVolumeClaim, shared by ingest and auth |
 
 **Patterns used:** API Gateway · Grounded Assistant (tool-use over own APIs) · Service-Owned Collections (shared MongoDB) · Backend for Frontend ·
 Service Discovery · Cache-Aside · Graceful Degradation · Retry with Backoff ·

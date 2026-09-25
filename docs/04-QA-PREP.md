@@ -62,6 +62,26 @@ config+secrets, MongoDB, then one per service (ingest, price, optimizer,
 gateway, assistant, forecast, auth, verification, validation, authorization),
 then autoscaling, then network policy.
 
+**If asked "what are the 61 resources, exactly?"**, the breakdown by kind is:
+
+| Kind | Count |
+|---|---|
+| Namespace | 1 |
+| ConfigMap | 1 |
+| Secret | 2 (`medimatrx-db-credentials`, `medimatrx-identity`) |
+| StatefulSet (MongoDB) | 1 |
+| Service | 11 (1 headless for MongoDB + 1 per application service) |
+| Deployment | 10 (one per application service) |
+| HorizontalPodAutoscaler | 10 |
+| PodDisruptionBudget | 9 |
+| NetworkPolicy | 16 |
+| **Total** | **61** |
+
+The MongoDB PersistentVolumeClaim is **not** a separate line here: it is
+created at deploy time from the `volumeClaimTemplates` block inside the
+StatefulSet, not declared as its own manifest object. `kubectl get pvc`
+shows it once the StatefulSet is running, but it does not add to the 61.
+
 ### 5. Where the two "REST API" requirements are met
 
 - *"programmatically connect to and use a REST API"* → the **price service**
