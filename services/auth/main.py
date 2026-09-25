@@ -1,23 +1,8 @@
-"""
-===========================================================================
- MediMatrx - AUTH SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I am the one place that knows who a member of hospital staff is. I
-     register accounts, check passwords, and hand out signed tokens that
-     every other service can trust without ever seeing a password."
-
- This is the "Database per Service" pattern applied to identity: ingest
- owns the meter readings, auth owns the accounts. Nobody else is allowed
- to touch either collection directly - they ask over HTTP instead.
-
- Two collections live in the shared MongoDB, owned exclusively by this
- service:
-   * users              - one document per staff account
-   * verification_codes - one-time codes, written on behalf of the
-                           verification-service (see /internal/codes below)
-===========================================================================
-"""
+# Auth service.
+# Registers staff accounts, checks passwords, and hands out signed tokens
+# that the other services can trust without ever seeing a password.
+# Owns two collections in MongoDB: users, and verification_codes (used on
+# behalf of the verification service, see /internal/codes below).
 
 import os
 import socket

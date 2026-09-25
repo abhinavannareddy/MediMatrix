@@ -1,24 +1,8 @@
-"""
-===========================================================================
- MediMatrx - OPTIMIZER SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I am the brain. I ask the Ingest Service what the hospital used, I ask
-     the Price Service what electricity costs, and I work out how much money
-     the hospital could save by running its non-clinical machines at
-     different times of day."
-
- I own NO database. I am completely stateless: every answer is computed from
- scratch out of data I fetch over REST from my two sibling services.
-
- Being stateless is exactly why I can be scaled horizontally without limit -
- any copy of me can answer any request, so Kubernetes can run 1 of me or 50.
-
- The hard safety rule encoded here:
-    Clinical zones (ICU, theatres, imaging, wards) are NEVER touched.
-    Patient safety beats electricity prices, always.
-===========================================================================
-"""
+# Optimizer service.
+# Gets usage data from Ingest and prices from Price, then works out how much
+# money could be saved by shifting non-clinical loads to cheaper hours.
+# No database here, everything is computed fresh from the other services.
+# Clinical zones (ICU, theatres, imaging, wards) are never touched.
 
 import os
 import socket

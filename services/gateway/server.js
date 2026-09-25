@@ -1,20 +1,7 @@
-// ===========================================================================
-//  MediMatrx - API GATEWAY
-// ---------------------------------------------------------------------------
-//  Job in one sentence:
-//     "I am the only door into the system. The web browser talks to me and
-//      nobody else. I serve the dashboard, and I forward each API call to
-//      whichever internal microservice owns that job."
-//
-//  This is the "API Gateway" cloud pattern. Why bother?
-//    1. The browser needs ONE address, not four.
-//    2. The internal services stay private - they are never exposed to the
-//       internet, so their attack surface is zero from outside.
-//    3. Security work (rate limiting, headers, authentication) is done once,
-//       here, instead of being copy-pasted into every service.
-//    4. Internal services can be renamed, rewritten or split up without the
-//       browser ever noticing.
-// ===========================================================================
+// API Gateway.
+// Only entry point the browser talks to - serves the dashboard and forwards
+// each request to the right internal service. Keeps the internal services
+// private and puts things like rate limiting and auth checks in one place.
 
 const express = require('express');
 const path = require('path');
