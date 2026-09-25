@@ -1,14 +1,6 @@
-// ===========================================================================
-//  MediMatrx - INGEST SERVICE
-// ---------------------------------------------------------------------------
-//  Job in one sentence:
-//     "I am the only service allowed to talk to the database. I take energy
-//      meter readings in, I store them, and I hand them back out over REST."
-//
-//  This is the classic microservice rule: one service owns one database.
-//  Nobody else gets to touch MongoDB - they have to ask me over HTTP.
-//  That pattern is called "Database per Service".
-// ===========================================================================
+// Ingest service.
+// The only service allowed to talk to MongoDB directly. Takes energy meter
+// readings in, stores them, and hands them back out over REST.
 
 const express = require('express');
 const { MongoClient } = require('mongodb');

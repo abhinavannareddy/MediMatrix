@@ -1,26 +1,8 @@
-"""
-===========================================================================
- MediMatrx - PRICE SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I go out to the public internet, fetch today's real Swedish electricity
-     spot prices, tidy them up into 24 hourly numbers, and serve them over
-     my own REST API."
-
- This service is the assignment's "programmatically connect to and use a
- REST API" requirement. It is an HTTP *client* of somebody else's API
- (elprisetjustnu.se) and an HTTP *server* of its own API at the same time.
-
- Two cloud patterns live in here:
-   * Cache-Aside      - we keep the answer in memory for 15 minutes instead
-                        of hammering the upstream API on every request.
-   * Circuit Breaker / Graceful Degradation
-                      - if the upstream API is slow or down, we do not crash
-                        and we do not block the whole hospital dashboard.
-                        We serve a stale cache, or a modelled fallback curve,
-                        and we clearly label which one we used.
-===========================================================================
-"""
+# Price service.
+# Fetches today's real Swedish electricity spot prices (elprisetjustnu.se),
+# tidies them into 24 hourly numbers, and serves them over its own REST API.
+# Caches the result for 15 minutes so we're not hammering the upstream API,
+# and falls back to a stale cache or a modelled curve if it's down.
 
 import os
 import socket

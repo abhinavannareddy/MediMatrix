@@ -1,44 +1,10 @@
-"""
-===========================================================================
- MediMatrx - FORECAST SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "Everything else in this platform tells you about yesterday. I tell you
-     what to do tomorrow."
-
- Why this service exists
- -----------------------
- A report card is not a product. An estates manager cannot act on
- "you could have saved 3,400 kr yesterday". They can act on "here is
- tomorrow's plan, approve it".
-
- To plan tomorrow you need two things nobody has yet:
-
-   1. TOMORROW'S PRICES. Nordic day-ahead prices are published in the early
-      afternoon for the following day. Before publication they genuinely do
-      not exist, and this service says so rather than inventing them.
-
-   2. TOMORROW'S LOAD. Which is mostly a question of weather. A hospital's
-      HVAC plant is the single biggest deferrable load, and how hard it works
-      is largely a function of outdoor temperature. So we fetch the forecast
-      and adjust.
-
- The weather model is deliberately simple and explainable
- -------------------------------------------------------
- Degree-hours, not machine learning. For each hour we compute how far the
- temperature sits outside the comfort band, then scale tomorrow's HVAC load
- against today's by the ratio of those numbers.
-
- An estates engineer can check this on paper in about a minute. That matters
- more than accuracy here: a hospital will not act on a number it cannot
- interrogate, and every competitor in this market ships a black box.
-
- The plan itself is NOT computed here. We post the predicted load and the
- predicted prices to the optimizer's scenario endpoint, so tomorrow's plan
- and today's report come out of the exact same engine and can never drift
- apart in their logic.
-===========================================================================
-"""
+# Forecast service.
+# Predicts tomorrow's prices and load so there's a plan to approve, not just
+# a report on what already happened. Tomorrow's HVAC load is estimated from
+# the weather forecast using simple degree-hours (temperature vs comfort
+# band), not machine learning, so the number can be checked by hand.
+# The actual plan is computed by the optimizer's scenario endpoint - this
+# service just feeds it tomorrow's predicted numbers.
 
 import os
 import socket

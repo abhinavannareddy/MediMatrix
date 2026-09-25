@@ -1,32 +1,9 @@
-"""
-===========================================================================
- MediMatrx - ASSISTANT SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I answer questions about this hospital's energy in plain English, and
-     every number I say comes from one of our own REST APIs, never from my
-     own head."
-
- The design rule that matters
- ----------------------------
- In a clinical setting an assistant that invents a number is worse than no
- assistant at all. So:
-
-   1. READ-ONLY. There is no tool here that changes anything. Not one.
-   2. I NEVER do arithmetic on my own. Numbers come from the ingest, price
-      and optimizer services; my job is to pick the right endpoint and put
-      the answer into a sentence.
-   3. EVERY answer cites which endpoint it came from, so it is auditable.
-   4. I ALWAYS work. The default engine is deterministic intent matching -
-      no API key, no internet, no cost, no hallucination. If an LLM key is
-      configured I will use it for nicer phrasing, but if that call fails
-      for any reason I fall back to the deterministic answer rather than
-      failing the request.
-
- Rule 4 is the same graceful-degradation pattern the price service uses for
- the upstream price API. Applied twice, deliberately.
-===========================================================================
-"""
+# Assistant service.
+# Answers questions about the hospital's energy use in plain English. Every
+# number comes from the ingest, price or optimizer service over REST, never
+# made up. Read-only - nothing here changes any data. Works without an LLM
+# key using deterministic intent matching; if an LLM key is set it's used
+# for nicer phrasing, with the deterministic answer as a fallback.
 
 import os
 import re

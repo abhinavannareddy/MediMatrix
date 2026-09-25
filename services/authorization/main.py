@@ -1,23 +1,8 @@
-"""
-===========================================================================
- MediMatrx - AUTHORIZATION SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I decode the token auth-service issued and answer one question:
-     is this caller allowed to do that?"
-
- Authentication (auth-service) and authorization (this service) are kept
- apart on purpose. Proving who somebody is and deciding what they may do
- are different concerns with different failure modes - a permissions
- change should never require touching the code that verifies passwords,
- and vice versa. The gateway calls this service, on every request to a
- protected route, before it proxies anywhere else.
-
- This service is completely stateless: it holds the signing secret (via
- the Secret, never in source) but no data of its own, so it scales
- horizontally with zero coordination between replicas.
-===========================================================================
-"""
+# Authorization service.
+# Decodes the token auth-service issued and checks if the caller is allowed
+# to do what they're asking. Kept separate from auth on purpose - who you
+# are and what you're allowed to do are different questions. Stateless,
+# no data of its own besides the signing secret.
 
 import os
 import socket

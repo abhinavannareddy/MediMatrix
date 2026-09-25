@@ -1,24 +1,8 @@
-"""
-===========================================================================
- MediMatrx - VALIDATION SERVICE
----------------------------------------------------------------------------
- Job in one sentence:
-    "I check that what a client is trying to send actually makes sense,
-     before it reaches a service that would have to trust it."
-
- This is the assignment report's own stated mitigation for injection
- attacks: "validate and sanitize all incoming data on the backend, and
- apply strict schema validation." The gateway calls this service for the
- two kinds of input a human or a device can submit - a meter reading and
- a new account - so a malformed or out-of-range request is rejected here,
- by name, instead of failing confusingly three services downstream.
-
- ingest and auth-service still do their own basic checks too. That is
- deliberate defence in depth, not duplication to be removed: this service
- can be skipped or fail closed without silently disabling the checks that
- protect the data those two services actually own.
-===========================================================================
-"""
+# Validation service.
+# Checks that incoming data (a meter reading or a new account) actually
+# makes sense before it reaches a service that would have to trust it.
+# Ingest and auth still do their own basic checks too - this is on top,
+# not instead of.
 
 import os
 import re
